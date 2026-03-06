@@ -1,0 +1,5 @@
+MakeMyTrip builds travel experiences for customers with curated packages and activities.
+
+RAG = Retrieval-Augmented Generation: retrieve relevant context from a knowledge base and then generate a response using an LLM.
+
+FAISS is a vector similarity search library used for fast nearest-neighbor retrieval.

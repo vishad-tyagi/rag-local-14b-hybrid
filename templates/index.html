@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local RAG • Ollama + FAISS</title>
+
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: rgba(255, 255, 255, 0.06);
+        --panel-2: rgba(255, 255, 255, 0.09);
+        --border: rgba(255, 255, 255, 0.12);
+        --text: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.65);
+        --muted-2: rgba(255, 255, 255, 0.45);
+        --accent: #7c5cff;
+        --accent-2: #00d4ff;
+        --shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
+        --radius: 18px;
+        --radius-sm: 12px;
+        --user: rgba(124, 92, 255, 0.22);
+        --assistant: rgba(0, 212, 255, 0.16);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        color: var(--text);
+        background:
+          radial-gradient(1200px 600px at 20% 0%, rgba(124, 92, 255, 0.35), transparent 60%),
+          radial-gradient(1000px 600px at 90% 10%, rgba(0, 212, 255, 0.25), transparent 55%),
+          radial-gradient(900px 600px at 50% 100%, rgba(67, 245, 166, 0.10), transparent 60%),
+          var(--bg);
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.95em;
+        color: rgba(255,255,255,0.86);
+      }
+
+      .wrap {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 18px 14px 22px;
+      }
+
+      /* Topbar */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .logo {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, rgba(124, 92, 255, 1), rgba(0, 212, 255, 0.8));
+        box-shadow: 0 10px 26px rgba(124, 92, 255, 0.25);
+        position: relative;
+        overflow: hidden;
+      }
+      .logo::after {
+        content: "";
+        position: absolute;
+        inset: -40%;
+        background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.55), transparent 35%);
+        transform: rotate(18deg);
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0.2px;
+      }
+
+      .sub {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .pill {
+        font-size: 12px;
+        color: rgba(255,255,255,0.8);
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.06);
+        padding: 6px 10px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+
+      /* Layout: Sidebar + Chat + Sources */
+      .layout {
+        display: grid;
+        grid-template-columns: 300px 1fr 360px;
+        gap: 14px;
+        align-items: start;
+      }
+
+      @media (max-width: 1120px) {
+        .layout { grid-template-columns: 300px 1fr; }
+        .right { display: none; }
+      }
+
+      @media (max-width: 860px) {
+        .layout { grid-template-columns: 1fr; }
+        .left { order: 2; }
+        .center { order: 1; }
+        .right { display: block; order: 3; }
+      }
+
+      .card {
+        background: linear-gradient(180deg, var(--panel), rgba(255,255,255,0.03));
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .hd {
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .hd h2 {
+        margin: 0;
+        font-size: 13px;
+        letter-spacing: 0.25px;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.78);
+      }
+
+      .bd { padding: 14px 14px 16px; }
+
+      .badge {
+        font-size: 11px;
+        color: rgba(255,255,255,0.85);
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.06);
+        padding: 3px 8px;
+        border-radius: 999px;
+        flex: 0 0 auto;
+      }
+
+      /* Sidebar */
+      .sidebarGroup { display: grid; gap: 10px; }
+      .btnRow { display: flex; gap: 10px; flex-wrap: wrap; }
+
+      .ghostBtn {
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(0,0,0,0.20);
+        color: rgba(255,255,255,0.9);
+        padding: 10px 12px;
+        border-radius: 14px;
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 13px;
+        transition: background 120ms ease, transform 120ms ease;
+      }
+      .ghostBtn:hover { background: rgba(255,255,255,0.06); }
+      .ghostBtn:active { transform: translateY(1px); }
+
+      .chipRow { display: flex; gap: 8px; flex-wrap: wrap; }
+      .chip {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.05);
+        padding: 6px 10px;
+        border-radius: 999px;
+        cursor: pointer;
+        user-select: none;
+        font-size: 12px;
+        color: rgba(255,255,255,0.82);
+      }
+      .chip:hover { background: rgba(255,255,255,0.08); }
+
+      .kv {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 6px 10px;
+        font-size: 12px;
+        color: rgba(255,255,255,0.78);
+      }
+      .kv .k { color: var(--muted); }
+      .kv .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      /* Chat */
+      .chatWrap {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        height: calc(100vh - 110px);
+        min-height: 560px;
+      }
+      @media (max-width: 860px) {
+        .chatWrap { height: auto; min-height: 520px; }
+      }
+
+      .chatHeader {
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .chatBody {
+        padding: 14px;
+        overflow: auto;
+      }
+
+      .emptyState {
+        border: 1px dashed rgba(255,255,255,0.18);
+        background: rgba(0,0,0,0.16);
+        border-radius: var(--radius-sm);
+        padding: 14px;
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 13px;
+      }
+
+      .bubbleRow { display: flex; margin: 10px 0; }
+      .bubble {
+        max-width: 86%;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.12);
+        padding: 12px 12px;
+        line-height: 1.55;
+        font-size: 14.5px;
+        white-space: pre-wrap;
+      }
+
+      .userRow { justify-content: flex-end; }
+      .userRow .bubble {
+        background: linear-gradient(180deg, var(--user), rgba(0,0,0,0.18));
+        border-color: rgba(124, 92, 255, 0.22);
+      }
+
+      .assistantRow { justify-content: flex-start; }
+      .assistantRow .bubble {
+        background: linear-gradient(180deg, var(--assistant), rgba(0,0,0,0.18));
+        border-color: rgba(0, 212, 255, 0.20);
+      }
+
+      .bubbleMeta {
+        font-size: 11px;
+        color: rgba(255,255,255,0.55);
+        margin-top: 6px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      /* Composer */
+      .composer {
+        padding: 12px;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        background: rgba(0,0,0,0.12);
+      }
+
+      .ask {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .input {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(0,0,0,0.20);
+        color: var(--text);
+        padding: 14px 14px;
+        font-size: 15px;
+        outline: none;
+        transition: border-color 150ms ease, box-shadow 150ms ease;
+      }
+      .input:focus {
+        border-color: rgba(124, 92, 255, 0.75);
+        box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.16);
+      }
+
+      .btn {
+        border: 0;
+        cursor: pointer;
+        border-radius: 14px;
+        padding: 12px 14px;
+        font-size: 14px;
+        font-weight: 800;
+        color: rgba(255,255,255,0.95);
+        background: linear-gradient(135deg, rgba(124, 92, 255, 1), rgba(0, 212, 255, 0.85));
+        box-shadow: 0 12px 28px rgba(124, 92, 255, 0.22);
+        transition: transform 120ms ease, filter 120ms ease;
+        min-width: 110px;
+      }
+      .btn:hover { filter: brightness(1.05); }
+      .btn:active { transform: translateY(1px); }
+      .btn:disabled { opacity: 0.75; cursor: not-allowed; }
+
+      .loading {
+        display: none;
+        margin-top: 10px;
+        gap: 10px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .dots { display: inline-flex; gap: 4px; }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.45);
+        animation: bounce 900ms infinite;
+      }
+      .dot:nth-child(2) { animation-delay: 150ms; }
+      .dot:nth-child(3) { animation-delay: 300ms; }
+      @keyframes bounce {
+        0%, 100% { transform: translateY(0); opacity: 0.45; }
+        50% { transform: translateY(-4px); opacity: 0.9; }
+      }
+
+      /* Sources */
+      .sources { display: grid; gap: 10px; }
+      details {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(0,0,0,0.18);
+        border-radius: 14px;
+        padding: 10px 12px;
+      }
+      summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        font-weight: 800;
+        font-size: 13px;
+      }
+      summary::-webkit-details-marker { display: none; }
+
+      .srcName { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+      .srcPath {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgba(255,255,255,0.78);
+        max-width: 260px;
+      }
+      .snippet {
+        margin-top: 10px;
+        color: rgba(255,255,255,0.78);
+        font-size: 13px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+
+      .footer {
+        margin-top: 12px;
+        color: var(--muted-2);
+        font-size: 12px;
+        text-align: center;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <div class="brand">
+          <div class="logo" aria-hidden="true"></div>
+          <div>
+            <h1>Local RAG</h1>
+            <div class="sub">LangChain + FAISS + Ollama</div>
+          </div>
+        </div>
+        <div class="pill">Model: <b>llama3.1</b> · Retriever: <b>FAISS</b></div>
+      </div>
+
+      <div class="layout">
+        <!-- LEFT SIDEBAR (2) -->
+        <div class="left card">
+          <div class="hd">
+            <h2>Controls</h2>
+            <span class="badge">Local</span>
+          </div>
+          <div class="bd">
+            <div class="sidebarGroup">
+              <div>
+                <div class="sub" style="margin-bottom: 8px;">Quick prompts</div>
+                <div class="chipRow">
+                  <span class="chip" data-q="Summarize the key points in the documents.">Summarize docs</span>
+                  <span class="chip" data-q="What is RAG and how does it work?">What is RAG?</span>
+                  <span class="chip" data-q="List the main topics covered and where they appear.">Topics + sources</span>
+                  <span class="chip" data-q="Give me a bullet-point study plan from these docs.">Study plan</span>
+                </div>
+              </div>
+
+              <div>
+                <div class="sub" style="margin-bottom: 8px;">Session</div>
+                <div class="btnRow">
+                  <button class="ghostBtn" type="button" id="clearChat">Clear chat</button>
+                  <button class="ghostBtn" type="button" id="scrollBottom">Scroll to bottom</button>
+                </div>
+              </div>
+
+              <div>
+                <div class="sub" style="margin-bottom: 8px;">Project status</div>
+                <div class="kv">
+                  <div class="k">Docs folder</div><div class="v"><code>data/</code></div>
+                  <div class="k">Index folder</div><div class="v"><code>vectorstore/</code></div>
+                  <div class="k">Index cmd</div><div class="v"><code>python ingest.py</code></div>
+                  <div class="k">Server</div><div class="v"><code>python app.py</code></div>
+                </div>
+                <div class="sub" style="margin-top: 10px;">
+                  Tip: if answers feel weak, add more docs to <code>data/</code> and re-run <code>python ingest.py</code>.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER CHAT (1) -->
+        <div class="center card chatWrap">
+          <div class="chatHeader">
+            <div>
+              <div style="font-weight: 900; letter-spacing: 0.2px;">Chat</div>
+              <div class="sub">Chat bubbles + session history (browser)</div>
+            </div>
+            <span class="badge">RAG</span>
+          </div>
+
+          <div class="chatBody" id="chatBody">
+            <div class="emptyState" id="emptyState">
+              No messages yet. Add files to <code>data/</code>, run <code>python ingest.py</code>, then ask your first question.
+              <br /><br />
+              Example: <code>Summarize the key points in the documents.</code>
+            </div>
+            <!-- Messages injected by JS -->
+          </div>
+
+          <div class="composer">
+            <form id="askForm" method="POST" action="/ask">
+              <div class="ask">
+                <input
+                  class="input"
+                  id="q"
+                  type="text"
+                  name="question"
+                  placeholder="Ask a question about your documents…"
+                  value="{{ question or '' }}"
+                  autocomplete="off"
+                />
+                <button class="btn" id="askBtn" type="submit">Ask</button>
+              </div>
+
+              <div class="loading" id="loading">
+                <div class="dots" aria-hidden="true">
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                </div>
+                <span>Thinking… retrieving context and generating answer</span>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- RIGHT SOURCES -->
+        <div class="right card">
+          <div class="hd">
+            <h2>Sources</h2>
+            <span class="badge">k=4</span>
+          </div>
+          <div class="bd">
+            {% if sources %}
+              <div class="sources">
+                {% for s in sources %}
+                  <details {% if loop.first %}open{% endif %}>
+                    <summary>
+                      <span class="srcName">
+                        <span class="badge">{{ loop.index }}</span>
+                        <span class="srcPath">{{ s.source }}</span>
+                      </span>
+                      <span class="sub">View</span>
+                    </summary>
+                    <div class="snippet">{{ s.snippet }}</div>
+                  </details>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="sub">
+                Sources will show up here after you ask a question.
+                <br /><br />
+                If you don’t see sources:
+                <ul style="margin: 10px 0 0 18px; color: rgba(255,255,255,0.62)">
+                  <li>Ensure you ran <code>python ingest.py</code></li>
+                  <li>Put PDFs/TXT/MD files in <code>data/</code></li>
+                </ul>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">Built for local learning · chat history is stored in <code>sessionStorage</code></div>
+    </div>
+
+    <script>
+      // Chat UI (client-side history)
+      const STORAGE_KEY = 'rag_chat_history_v1';
+
+      function safeJsonParse(s, fallback) {
+        try { return JSON.parse(s); } catch { return fallback; }
+      }
+
+      function loadHistory() {
+        return safeJsonParse(sessionStorage.getItem(STORAGE_KEY) || '[]', []);
+      }
+
+      function saveHistory(items) {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#039;');
+      }
+
+      function addMessage(container, role, text, meta) {
+        const row = document.createElement('div');
+        row.className = 'bubbleRow ' + (role === 'user' ? 'userRow' : 'assistantRow');
+
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.innerHTML = escapeHtml(text);
+
+        if (meta) {
+          const metaDiv = document.createElement('div');
+          metaDiv.className = 'bubbleMeta';
+          metaDiv.innerHTML = escapeHtml(meta);
+          bubble.appendChild(metaDiv);
+        }
+
+        row.appendChild(bubble);
+        container.appendChild(row);
+      }
+
+      function renderAll() {
+        const chatBody = document.getElementById('chatBody');
+        const empty = document.getElementById('emptyState');
+        chatBody.querySelectorAll('.bubbleRow').forEach((n) => n.remove());
+
+        const hist = loadHistory();
+        if (hist.length === 0) {
+          empty.style.display = 'block';
+          return;
+        }
+        empty.style.display = 'none';
+
+        hist.forEach((m) => addMessage(chatBody, m.role, m.text, m.meta || ''));
+        chatBody.scrollTop = chatBody.scrollHeight;
+      }
+
+      function pushIfNew(question, answer) {
+        if (!question || !answer) return;
+
+        const hist = loadHistory();
+        const lastQ = [...hist].reverse().find((m) => m.role === 'user');
+        const lastA = [...hist].reverse().find((m) => m.role === 'assistant');
+
+        // Avoid duplicates on refresh
+        if (lastQ && lastA && lastQ.text === question && lastA.text === answer) return;
+
+        const meta = new Date().toLocaleString();
+        hist.push({ role: 'user', text: question, meta });
+        hist.push({ role: 'assistant', text: answer, meta });
+
+        const MAX_ITEMS = 60; // 30 turns
+        saveHistory(hist.length > MAX_ITEMS ? hist.slice(hist.length - MAX_ITEMS) : hist);
+      }
+
+      // Initial render
+      renderAll();
+
+      // Persist server-rendered Q/A into chat history
+      const serverQuestion = {{ (question or "") | tojson }};
+      const serverAnswer = {{ (answer or "") | tojson }};
+      if (serverQuestion && serverAnswer) {
+        pushIfNew(serverQuestion, serverAnswer);
+        renderAll();
+      }
+
+      // Quick prompt chips
+      document.querySelectorAll('.chip').forEach((el) => {
+        el.addEventListener('click', () => {
+          const q = el.getAttribute('data-q') || '';
+          const input = document.getElementById('q');
+          input.value = q;
+          input.focus();
+        });
+      });
+
+      // Loading state
+      const form = document.getElementById('askForm');
+      const loading = document.getElementById('loading');
+      const btn = document.getElementById('askBtn');
+      form.addEventListener('submit', () => {
+        loading.style.display = 'flex';
+        btn.disabled = true;
+      });
+
+      // Clear chat
+      document.getElementById('clearChat').addEventListener('click', () => {
+        sessionStorage.removeItem(STORAGE_KEY);
+        renderAll();
+      });
+
+      // Scroll to bottom
+      document.getElementById('scrollBottom').addEventListener('click', () => {
+        const chatBody = document.getElementById('chatBody');
+        chatBody.scrollTop = chatBody.scrollHeight;
+      });
+    </script>
+  </body>
+</html>
