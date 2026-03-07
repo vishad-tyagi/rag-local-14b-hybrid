@@ -1,23 +1,28 @@
-import os
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.chat_models import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
 
+from hf_models import HFEmbeddingsAPI, HFChatLLM
 
 VECTORSTORE_DIR = Path("vectorstore")
 INDEX_NAME = "faiss_index"
 
+SYSTEM_PROMPT = (
+    "You are Butler, a helpful assistant. "
+    "Answer the user's question using ONLY the provided context. "
+    "If the answer is not in the context, say: "
+    "\"I don't know based on the provided documents.\""
+)
 
-PROMPT = """You are a helpful assistant.
-Answer the user's question using ONLY the provided context.
-If the answer is not in the context, say: "I don't know based on the provided documents."
 
-Context:
+def build_prompt(question: str, docs: List) -> str:
+    context = "\n\n".join(
+        f"[Source: {d.metadata.get('source', 'unknown')}]\n{d.page_content}"
+        for d in docs
+    )
+
+    return f"""Context:
 {context}
 
 Question:
@@ -32,11 +37,7 @@ def build_rag() -> Tuple:
             f"FAISS index not found at {index_path.resolve()}. Run: python ingest.py"
         )
 
-    # embeddings = OllamaEmbeddings(model="llama3.1")
-    
-    EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL)
-    
+    embeddings = HFEmbeddingsAPI()
     vectorstore = FAISS.load_local(
         str(index_path),
         embeddings,
@@ -44,27 +45,12 @@ def build_rag() -> Tuple:
     )
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    llm = HFChatLLM()
 
-    llm = ChatOllama(
-        model="llama3.1",
-        temperature=0.2,
-    )
+    class RAGChain:
+        def invoke(self, question: str) -> str:
+            docs = retriever.invoke(question)
+            prompt = build_prompt(question, docs)
+            return llm.answer(prompt=prompt, system_prompt=SYSTEM_PROMPT)
 
-    prompt = ChatPromptTemplate.from_template(PROMPT)
-
-    def format_docs(docs):
-        return "\n\n".join(
-            f"[Source: {d.metadata.get('source','unknown')}]\n{d.page_content}"
-            for d in docs
-        )
-
-    rag_chain = (
-        {
-            "context": retriever | format_docs,
-            "question": RunnablePassthrough(),
-        }
-        | prompt
-        | llm
-    )
-
-    return rag_chain, retriever
+    return RAGChain(), retriever, llm

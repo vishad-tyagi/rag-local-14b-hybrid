@@ -1,25 +1,41 @@
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, Response, jsonify, render_template, request
 import json
-import requests
 
-from rag_chain import build_rag
+from rag_chain import SYSTEM_PROMPT, build_prompt, build_rag
 
 app = Flask(__name__)
 
-rag_chain, retriever = build_rag()
-
-OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
-OLLAMA_MODEL = "llama3.1"
-
-SYSTEM_PROMPT = (
-    "You are a helpful assistant. Answer the user's question using ONLY the provided context. "
-    "If the answer is not in the context, say: \"I don't know based on the provided documents.\""
-)
+rag_chain, retriever, llm = build_rag()
 
 
 @app.get("/")
 def home():
     return render_template("index.html", answer=None, question=None, sources=None)
+
+
+@app.post("/ask")
+def ask():
+    question = request.form.get("question", "").strip()
+    if not question:
+        return render_template(
+            "index.html",
+            answer="Please enter a question.",
+            question="",
+            sources=[],
+        )
+
+    docs = retriever.invoke(question)
+    sources = [
+        {
+            "source": d.metadata.get("source", "unknown"),
+            "snippet": d.page_content[:300] + ("..." if len(d.page_content) > 300 else ""),
+        }
+        for d in docs
+    ]
+
+    answer = rag_chain.invoke(question)
+
+    return render_template("index.html", answer=answer, question=question, sources=sources)
 
 
 @app.post("/api/ask")
@@ -39,8 +55,7 @@ def api_ask():
         for d in docs
     ]
 
-    result = rag_chain.invoke(question)
-    answer = getattr(result, "content", str(result))
+    answer = rag_chain.invoke(question)
     return jsonify({"answer": answer, "sources": sources})
 
 
@@ -50,7 +65,10 @@ def api_ask_stream():
     question = (payload.get("question") or "").strip()
 
     if not question:
-        return Response("event: error\ndata: \"Please enter a question.\"\n\n", mimetype="text/event-stream")
+        return Response(
+            'event: error\ndata: "Please enter a question."\n\n',
+            mimetype="text/event-stream",
+        )
 
     docs = retriever.invoke(question)
     sources = [
@@ -61,46 +79,23 @@ def api_ask_stream():
         for d in docs
     ]
 
-    context = "\n\n".join(
-        f"[Source: {d.metadata.get('source', 'unknown')}]\n{d.page_content}" for d in docs
-    )
-    user_prompt = f"Context:\n{context}\n\nQuestion:\n{question}"
+    prompt = build_prompt(question, docs)
 
     def sse():
-        # Send sources first
         yield f"event: sources\ndata: {json.dumps(sources)}\n\n"
 
         try:
-            ollama_payload = {
-                "model": OLLAMA_MODEL,
-                "stream": True,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "options": {"temperature": 0.2},
-            }
+            for token in llm.stream_answer(
+                prompt=prompt,
+                system_prompt=SYSTEM_PROMPT,
+            ):
+                # send token as JSON string so spaces/newlines are preserved
+                yield f"event: token\ndata: {json.dumps(token)}\n\n"
 
-            with requests.post(OLLAMA_CHAT_URL, json=ollama_payload, stream=True, timeout=300) as r:
-                r.raise_for_status()
-
-                for line in r.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    data = json.loads(line)
-
-                    if data.get("done"):
-                        break
-
-                    delta = (data.get("message") or {}).get("content") or ""
-                    if delta:
-                        # IMPORTANT: send token as JSON string to preserve spaces/newlines exactly
-                        yield f"event: token\ndata: {json.dumps(delta)}\n\n"
-
-            yield "event: done\ndata: \"ok\"\n\n"
+            yield 'event: done\ndata: "ok"\n\n'
 
         except Exception as e:
-            yield f"event: error\ndata: {json.dumps(str(e))}\n\n"
+            yield f'event: error\ndata: {json.dumps(str(e))}\n\n'
 
     return Response(sse(), mimetype="text/event-stream")
 
