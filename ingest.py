@@ -5,7 +5,7 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from hf_models import HFEmbeddingsAPI
+from hf_models import LocalEmbeddings
 
 DATA_DIR = Path("data")
 VECTORSTORE_DIR = Path("vectorstore")
@@ -33,28 +33,28 @@ def load_documents(data_dir: Path) -> List:
 
 
 def main() -> None:
-    if not DATA_DIR.exists():
-        raise FileNotFoundError(f"Missing data directory: {DATA_DIR.resolve()}")
+        if not DATA_DIR.exists():
+            raise FileNotFoundError(f"Missing data directory: {DATA_DIR.resolve()}")
 
-    docs = load_documents(DATA_DIR)
-    if not docs:
-        raise ValueError(f"No supported files found in {DATA_DIR.resolve()}")
+        docs = load_documents(DATA_DIR)
+        if not docs:
+            raise ValueError(f"No supported files found in {DATA_DIR.resolve()}")
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=900,
-        chunk_overlap=150,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-    chunks = splitter.split_documents(docs)
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=900,
+            chunk_overlap=150,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        chunks = splitter.split_documents(docs)
 
-    embeddings = HFEmbeddingsAPI()
+        embeddings = LocalEmbeddings()
 
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-    VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)
-    vectorstore.save_local(str(VECTORSTORE_DIR / INDEX_NAME))
+        vectorstore = FAISS.from_documents(chunks, embeddings)
+        VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)
+        vectorstore.save_local(str(VECTORSTORE_DIR / INDEX_NAME))
 
-    print(f"Indexed {len(docs)} documents into {len(chunks)} chunks.")
-    print(f"Saved FAISS index to: {VECTORSTORE_DIR / INDEX_NAME}")
+        print(f"Indexed {len(docs)} documents into {len(chunks)} chunks.")
+        print(f"Saved FAISS index to: {VECTORSTORE_DIR / INDEX_NAME}")
 
 
 if __name__ == "__main__":

@@ -89,7 +89,6 @@ def api_ask_stream():
                 prompt=prompt,
                 system_prompt=SYSTEM_PROMPT,
             ):
-                # send token as JSON string so spaces/newlines are preserved
                 yield f"event: token\ndata: {json.dumps(token)}\n\n"
 
             yield 'event: done\ndata: "ok"\n\n'

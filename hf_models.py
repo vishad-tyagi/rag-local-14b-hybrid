@@ -1,103 +1,56 @@
-import math
-import os
 from typing import Iterable, List
 
-from dotenv import load_dotenv
-from huggingface_hub import InferenceClient
+import torch
 from langchain_core.embeddings import Embeddings
+from mlx_lm import load, generate, stream_generate
+from sentence_transformers import SentenceTransformer
 
-load_dotenv()
-
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-CHAT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+CHAT_MODEL = "mlx-community/Qwen2.5-3B-Instruct-4bit"
 
 
-def _require_token() -> None:
-    if not HF_TOKEN:
-        raise ValueError("HF_TOKEN not found. Put it in your .env file.")
-
-
-def _to_python_list(obj):
-    if hasattr(obj, "tolist"):
-        return obj.tolist()
-    return obj
-
-
-def _mean_pool(matrix: List[List[float]]) -> List[float]:
-    if not matrix:
-        return []
-    cols = len(matrix[0])
-    sums = [0.0] * cols
-    for row in matrix:
-        for i, val in enumerate(row):
-            sums[i] += float(val)
-    return [x / len(matrix) for x in sums]
-
-
-def _coerce_to_vector(output) -> List[float]:
+def _embedding_device() -> str:
     """
-    HF feature_extraction can return either:
-    - a 1D vector
-    - a 2D matrix
-    Convert both into one 1D vector.
+    Use MPS on Apple Silicon if available, otherwise CPU.
     """
-    output = _to_python_list(output)
-
-    if not output:
-        return []
-
-    if isinstance(output[0], (int, float)):
-        return [float(x) for x in output]
-
-    if isinstance(output[0], list):
-        return _mean_pool(output)
-
-    raise ValueError(f"Unexpected embedding output shape/type: {type(output)}")
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
-def _l2_normalize(vec: List[float]) -> List[float]:
-    norm = math.sqrt(sum(x * x for x in vec))
-    if norm == 0:
-        return vec
-    return [x / norm for x in vec]
-
-
-class HFEmbeddingsAPI(Embeddings):
-    def __init__(self, model: str = EMBEDDING_MODEL):
-        _require_token()
-        self.model = model
-        self.client = InferenceClient(
-            provider="hf-inference",
-            api_key=HF_TOKEN,
-        )
+class LocalEmbeddings(Embeddings):
+    def __init__(self, model_name: str = EMBEDDING_MODEL):
+        self.model_name = model_name
+        self.device = _embedding_device()
+        self.model = SentenceTransformer(self.model_name, device=self.device)
 
     def embed_query(self, text: str) -> List[float]:
-        result = self.client.feature_extraction(
-            text,
-            model=self.model,
-        )
-        vector = _coerce_to_vector(result)
-        return _l2_normalize(vector)
+        vector = self.model.encode(text, normalize_embeddings=True)
+        return vector.tolist()
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return [self.embed_query(text) for text in texts]
+        vectors = self.model.encode(texts, normalize_embeddings=True)
+        return vectors.tolist()
 
 
-class HFChatLLM:
-    """
-    Uses Hugging Face CHAT COMPLETIONS.
-    Important:
-    - Do NOT force provider="hf-inference" here.
-    - Let Hugging Face route to the available provider for this model.
-    """
+class MLXLocalLLM:
+    def __init__(self, model_name: str = CHAT_MODEL):
+        self.model_name = model_name
 
-    def __init__(self, model: str = CHAT_MODEL):
-        _require_token()
-        self.model = model
-        self.client = InferenceClient(
-            api_key=HF_TOKEN,
+        # On first run this downloads the MLX model to local HF cache.
+        # Later runs use the cached local copy.
+        self.model, self.tokenizer = load(self.model_name)
+
+    def _format_prompt(self, prompt: str, system_prompt: str | None = None) -> str:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
         )
 
     def answer(
@@ -105,123 +58,32 @@ class HFChatLLM:
         prompt: str,
         system_prompt: str | None = None,
         max_tokens: int = 700,
-        temperature: float = 0.2,
     ) -> str:
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+        formatted_prompt = self._format_prompt(prompt, system_prompt)
 
-        completion = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
+        output = generate(
+            self.model,
+            self.tokenizer,
+            prompt=formatted_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
-            stream=False,
+            verbose=False,
         )
 
-        return completion.choices[0].message.content or ""
+        return output.strip()
 
     def stream_answer(
         self,
         prompt: str,
         system_prompt: str | None = None,
         max_tokens: int = 700,
-        temperature: float = 0.2,
-    ):
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+    ) -> Iterable[str]:
+        formatted_prompt = self._format_prompt(prompt, system_prompt)
 
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
+        for response in stream_generate(
+            self.model,
+            self.tokenizer,
+            formatted_prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
-            stream=True,
-        )
-
-        for chunk in stream:
-            try:
-                delta = chunk.choices[0].delta.content
-            except (AttributeError, IndexError, KeyError):
-                delta = None
-
-            if delta:
-                yield delta
-                
-                
-
-# class HFChatLLM:
-#     """
-#     Uses Hugging Face TEXT GENERATION instead of chat completions.
-#     This fixes the 404 / conversational-task mismatch for the chosen model.
-#     """
-
-#     def __init__(self, model: str = CHAT_MODEL):
-#         _require_token()
-#         self.model = model
-#         self.client = InferenceClient(
-#             # provider="hf-inference",
-#             api_key=HF_TOKEN,
-#         )
-
-#     def _build_prompt(self, prompt: str, system_prompt: str | None = None) -> str:
-#         if system_prompt:
-#             return f"""<|system|>
-# {system_prompt}
-# <|user|>
-# {prompt}
-# <|assistant|>
-# """
-#         return f"""<|user|>
-# {prompt}
-# <|assistant|>
-# """
-
-#     def answer(
-#         self,
-#         prompt: str,
-#         system_prompt: str | None = None,
-#         max_tokens: int = 700,
-#         temperature: float = 0.2,
-#     ) -> str:
-#         full_prompt = self._build_prompt(prompt, system_prompt)
-
-#         output = self.client.text_generation(
-#             prompt=full_prompt,
-#             model=self.model,
-#             max_new_tokens=max_tokens,
-#             temperature=temperature,
-#             return_full_text=False,
-#             do_sample=True,
-#         )
-
-#         return output.strip()
-
-#     def stream_answer(
-#         self,
-#         prompt: str,
-#         system_prompt: str | None = None,
-#         max_tokens: int = 700,
-#         temperature: float = 0.2,
-#     ) -> Iterable[str]:
-#         full_prompt = self._build_prompt(prompt, system_prompt)
-
-#         stream = self.client.text_generation(
-#             prompt=full_prompt,
-#             model=self.model,
-#             max_new_tokens=max_tokens,
-#             temperature=temperature,
-#             return_full_text=False,
-#             do_sample=True,
-#             stream=True,
-#         )
-
-#         for chunk in stream:
-#             if chunk:
-#                 yield chunk
-
-
-
+        ):
+            if getattr(response, "text", None):
+                yield response.text

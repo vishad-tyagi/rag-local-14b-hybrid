@@ -3,7 +3,7 @@ from typing import List, Tuple
 
 from langchain_community.vectorstores import FAISS
 
-from hf_models import HFEmbeddingsAPI, HFChatLLM
+from hf_models import LocalEmbeddings, MLXLocalLLM
 
 VECTORSTORE_DIR = Path("vectorstore")
 INDEX_NAME = "faiss_index"
@@ -37,7 +37,8 @@ def build_rag() -> Tuple:
             f"FAISS index not found at {index_path.resolve()}. Run: python ingest.py"
         )
 
-    embeddings = HFEmbeddingsAPI()
+    embeddings = LocalEmbeddings()
+
     vectorstore = FAISS.load_local(
         str(index_path),
         embeddings,
@@ -45,7 +46,7 @@ def build_rag() -> Tuple:
     )
 
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
-    llm = HFChatLLM()
+    llm = MLXLocalLLM()
 
     class RAGChain:
         def invoke(self, question: str) -> str:
