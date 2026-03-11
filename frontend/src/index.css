@@ -75,6 +75,26 @@ code {
   font-size: 12px; color: var(--muted);
   font-weight: 900; text-transform: uppercase; letter-spacing: .3px;
 }
+
+.modeSwitch{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.modeBtn{
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.88);
+  font-weight: 800;
+  cursor: pointer;
+}
+.modeBtn.active{
+  background: rgba(25,195,125,0.18);
+  border-color: rgba(25,195,125,0.35);
+}
+
 .sideChips{ display:flex; gap:8px; flex-wrap:wrap; }
 .chip{
   padding: 6px 10px;
@@ -86,6 +106,7 @@ code {
   font-size: 12px;
 }
 .chip:hover{ background: rgba(255,255,255,0.07); }
+
 .sideTip{
   font-size: 12px;
   color: var(--muted);
@@ -133,7 +154,6 @@ code {
   padding: 14px 18px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
-
 .avatar{
   width: 64px;
   height: 40px;
@@ -144,18 +164,6 @@ code {
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
 }
-
-/* (2) swap sides:
-   user LEFT (default), assistant RIGHT (reverse grid) */
-.msgRow.user{
-  background: rgba(255,255,255,0.02);
-}
-/* Butler (assistant) LEFT - default */
-.msgRow.assistant{
-  background: rgba(255,255,255,0.00);
-}
-
-/* You (user) RIGHT - reverse grid */
 .msgRow.user{
   background: rgba(255,255,255,0.02);
   grid-template-columns: 1fr 72px;
@@ -166,18 +174,62 @@ code {
   justify-self: end;
   text-align: left;
 }
-
-.msgBubble{
-  max-width: 760px;
+.msgRow.assistant{
+  background: rgba(255,255,255,0.00);
 }
-.msgRow.assistant .msgBubble{
-  max-width: 620px;
-}
-
+.msgBubble{ max-width: 760px; }
+.msgRow.user .msgBubble{ max-width: 620px; }
 .msgText{
   white-space: pre-wrap;
   line-height: 1.6;
   font-size: 15px;
+}
+
+/* SQL assistant block */
+.sqlBlock{
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+.sqlBlock details{
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.03);
+  border-radius: 12px;
+  padding: 10px;
+}
+.sqlBlock summary{
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  color: rgba(255,255,255,0.90);
+}
+.sqlCode{
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 10px;
+  overflow-x: auto;
+  background: rgba(0,0,0,0.30);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+
+.sqlTableWrap{
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.sqlTable{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.sqlTable th, .sqlTable td{
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.sqlTable th{
+  background: rgba(255,255,255,0.06);
 }
 
 /* Typing animation */
@@ -233,8 +285,6 @@ code {
   border-color: rgba(25,195,125,0.45);
   box-shadow: 0 0 0 4px rgba(25,195,125,0.10);
 }
-
-/* (3) Send button as icon */
 .iconBtn{
   width: 44px;
   height: 44px;
@@ -250,9 +300,6 @@ code {
   background: rgba(25,195,125,0.18);
   border-color: rgba(25,195,125,0.35);
 }
-.iconBtn.send:hover{ filter: brightness(1.05); }
-.iconBtn.stop:hover{ filter: brightness(1.05); }
-
 .composerHint{
   max-width: 760px;
   margin: 8px auto 0;
@@ -260,7 +307,7 @@ code {
   color: var(--muted2);
 }
 
-/* Sources panel */
+/* Sources */
 .sourcesPanel{
   border-left: 1px solid var(--border);
   background: linear-gradient(180deg, #0b0c12, #10121b);
@@ -278,13 +325,13 @@ code {
 .sourcesEmpty{ font-size: 12px; color: var(--muted); }
 
 .sourcesList{ display:grid; gap:10px; }
-details{
+.sourcesList details{
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.03);
   border-radius: 12px;
   padding: 10px;
 }
-summary{
+.sourcesList summary{
   list-style:none;
   cursor:pointer;
   display:flex;
@@ -293,7 +340,7 @@ summary{
   font-weight: 900;
   font-size: 13px;
 }
-summary::-webkit-details-marker{ display:none; }
+.sourcesList summary::-webkit-details-marker{ display:none; }
 .srcLeft{ display:inline-flex; gap:8px; align-items:center; min-width:0; }
 .badge{
   font-size: 11px;

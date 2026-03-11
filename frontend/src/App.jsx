@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const STORAGE_KEY = "rag_chat_history_react_v3";
+const STORAGE_KEY = "rag_chat_history_react_v4";
 
 function loadHistory() {
   try {
@@ -23,7 +23,6 @@ function clamp(items, max = 80) {
   return items.length > max ? items.slice(items.length - max) : items;
 }
 
-// Parse SSE stream (event + data)
 function parseSSEChunk(buffer) {
   const events = [];
   const parts = buffer.split("\n\n");
@@ -35,7 +34,7 @@ function parseSSEChunk(buffer) {
     let dataLines = [];
     for (const line of lines) {
       if (line.startsWith("event:")) event = line.slice(6).trim();
-      if (line.startsWith("data:")) dataLines.push(line.slice(5)); // DO NOT trim -> preserves spaces
+      if (line.startsWith("data:")) dataLines.push(line.slice(5));
     }
     const data = dataLines.join("\n");
     events.push({ event, data });
@@ -44,7 +43,7 @@ function parseSSEChunk(buffer) {
   return { events, rest };
 }
 
-function Sidebar({ onNewChat, quickPrompts, onPickPrompt }) {
+function Sidebar({ onNewChat, quickPrompts, onPickPrompt, mode, setMode }) {
   return (
     <div className="sidebar">
       <div className="sideTop">
@@ -52,13 +51,31 @@ function Sidebar({ onNewChat, quickPrompts, onPickPrompt }) {
           <div className="sideLogo">R</div>
           <div>
             <div className="sideTitle">Local RAG</div>
-            <div className="sideSub">Flask + FAISS + Ollama</div>
+            <div className="sideSub">Flask + FAISS + MLX</div>
           </div>
         </div>
 
         <button className="sideBtn" onClick={onNewChat}>
           + New chat
         </button>
+      </div>
+
+      <div className="sideSection">
+        <div className="sideSectionTitle">Mode</div>
+        <div className="modeSwitch">
+          <button
+            className={`modeBtn ${mode === "rag" ? "active" : ""}`}
+            onClick={() => setMode("rag")}
+          >
+            RAG
+          </button>
+          <button
+            className={`modeBtn ${mode === "sql" ? "active" : ""}`}
+            onClick={() => setMode("sql")}
+          >
+            SQL
+          </button>
+        </div>
       </div>
 
       <div className="sideSection">
@@ -75,23 +92,27 @@ function Sidebar({ onNewChat, quickPrompts, onPickPrompt }) {
       <div className="sideSection">
         <div className="sideSectionTitle">Tips</div>
         <div className="sideTip">
-          Add docs to <code>data/</code> → run <code>python ingest.py</code>
+          RAG mode uses <code>data/</code>. SQL mode uses <code>data.db</code>.
         </div>
       </div>
     </div>
   );
 }
 
-function SourcesPanel({ sources }) {
+function SourcesPanel({ sources, mode }) {
   return (
     <div className="sourcesPanel">
       <div className="sourcesHeader">
-        <div className="sourcesTitle">Sources</div>
-        <div className="sourcesMeta">Top retrieved chunks</div>
+        <div className="sourcesTitle">Context</div>
+        <div className="sourcesMeta">
+          {mode === "rag" ? "Retrieved chunks" : "SQL mode doesn't use document chunks"}
+        </div>
       </div>
 
       <div className="sourcesBody">
-        {sources?.length ? (
+        {mode !== "rag" ? (
+          <div className="sourcesEmpty">Switch back to RAG mode to see retrieved sources here.</div>
+        ) : sources?.length ? (
           <div className="sourcesList">
             {sources.map((s, i) => (
               <details key={i} open={i === 0}>
@@ -107,20 +128,62 @@ function SourcesPanel({ sources }) {
             ))}
           </div>
         ) : (
-          <div className="sourcesEmpty">Ask a question to see retrieved context here.</div>
+          <div className="sourcesEmpty">Ask a question in RAG mode to see retrieved context here.</div>
         )}
       </div>
     </div>
   );
 }
 
-function Message({ role, text }) {
-  const isUser = role === "user";
+function ResultTable({ columns, rows }) {
+  if (!columns?.length) return null;
+
+  return (
+    <div className="sqlTableWrap">
+      <table className="sqlTable">
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={col}>{col}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr key={idx}>
+              {columns.map((col) => (
+                <td key={col}>{String(row[col] ?? "")}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Message({ message }) {
+  const isUser = message.role === "user";
+
   return (
     <div className={`msgRow ${isUser ? "user" : "assistant"}`}>
       <div className="avatar">{isUser ? "You" : "Butler"}</div>
       <div className="msgBubble">
-        <div className="msgText">{text}</div>
+        <div className="msgText">{message.text}</div>
+
+        {!isUser && message.mode === "sql" ? (
+          <div className="sqlBlock">
+            <details open>
+              <summary>Generated SQL</summary>
+              <pre className="sqlCode">{message.sql || "No SQL generated."}</pre>
+            </details>
+
+            <details open>
+              <summary>Raw output</summary>
+              <ResultTable columns={message.columns || []} rows={message.rows || []} />
+            </details>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -146,19 +209,26 @@ export default function App() {
   const [input, setInput] = useState("");
   const [sources, setSources] = useState([]);
   const [streaming, setStreaming] = useState(false);
+  const [mode, setMode] = useState("rag");
 
   const chatRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
 
   const quickPrompts = useMemo(
-    () => [
-      { label: "Summarize docs", q: "Summarize the key points in the documents." },
-      { label: "What is RAG?", q: "What is RAG and how does it work?" },
-      { label: "Topics + sources", q: "List the main topics covered and where they appear." },
-      { label: "Study plan", q: "Give me a bullet-point study plan from these docs." },
-    ],
-    []
+    () =>
+      mode === "rag"
+        ? [
+            { label: "Summarize docs", q: "Summarize the key points in the documents." },
+            { label: "What is RAG?", q: "What is RAG and how does it work?" },
+            { label: "Topics + sources", q: "List the main topics covered and where they appear." },
+          ]
+        : [
+            { label: "Inventory value", q: "What is the total inventory value for each product?" },
+            { label: "Low stock", q: "Which products have stock quantity less than 20?" },
+            { label: "Average price", q: "What is the average price by category?" },
+          ],
+    [mode]
   );
 
   useEffect(() => saveHistory(messages), [messages]);
@@ -188,14 +258,49 @@ export default function App() {
     const q = (questionMaybe ?? input).trim();
     if (!q || streaming) return;
 
-    const userMsg = { id: uid(), role: "user", text: q };
-    const assistantId = uid();
-    const assistantMsg = { id: assistantId, role: "assistant", text: "" };
-
-    setMessages((prev) => clamp([...prev, userMsg, assistantMsg]));
+    const userMsg = { id: uid(), role: "user", text: q, mode };
+    setMessages((prev) => clamp([...prev, userMsg]));
     setInput("");
-    setSources([]);
     setStreaming(true);
+
+    if (mode === "sql") {
+      setSources([]);
+      try {
+        const res = await fetch("/api/sql/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q }),
+        });
+
+        const data = await res.json();
+
+        const assistantMsg = {
+          id: uid(),
+          role: "assistant",
+          mode: "sql",
+          text: data.summary || "No summary returned.",
+          sql: data.sql || "",
+          columns: data.columns || [],
+          rows: data.rows || [],
+        };
+
+        setMessages((prev) => clamp([...prev, assistantMsg]));
+      } catch (e) {
+        setMessages((prev) =>
+          clamp([...prev, { id: uid(), role: "assistant", mode: "sql", text: `Error: ${String(e)}` }])
+        );
+      } finally {
+        setStreaming(false);
+        inputRef.current?.focus();
+      }
+      return;
+    }
+
+    // RAG mode (streaming)
+    const assistantId = uid();
+    const assistantMsg = { id: assistantId, role: "assistant", mode: "rag", text: "" };
+    setMessages((prev) => clamp([...prev, assistantMsg]));
+    setSources([]);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -235,7 +340,6 @@ export default function App() {
               setSources(JSON.parse(ev.data));
             } catch {}
           } else if (ev.event === "token") {
-            // token data is JSON string -> preserves spaces/newlines perfectly
             let token = "";
             try {
               token = JSON.parse(ev.data);
@@ -290,27 +394,38 @@ export default function App() {
 
   return (
     <div className="appShell">
-      <Sidebar onNewChat={newChat} quickPrompts={quickPrompts} onPickPrompt={pickPrompt} />
+      <Sidebar
+        onNewChat={newChat}
+        quickPrompts={quickPrompts}
+        onPickPrompt={pickPrompt}
+        mode={mode}
+        setMode={setMode}
+      />
 
       <div className="main">
         <div className="topBar">
-          <div className="topTitle">Chat</div>
-          <div className="topMeta">Model: llama3.1 · RAG: FAISS</div>
+          <div className="topTitle">{mode === "rag" ? "RAG Chat" : "SQL Chat"}</div>
+          <div className="topMeta">
+            {mode === "rag" ? "Document Q&A" : "Text-to-SQL on data.db"}
+          </div>
         </div>
 
         <div className="chat" ref={chatRef}>
           {messages.length === 0 ? (
             <div className="empty">
-              <div className="emptyTitle">ChatGPT-style local RAG</div>
+              <div className="emptyTitle">
+                {mode === "rag" ? "Local RAG mode" : "Text-to-SQL mode"}
+              </div>
               <div className="emptySub">
-                Add docs to <code>data/</code>, run <code>python ingest.py</code>, then ask.
+                {mode === "rag"
+                  ? <>Ask questions about your files in <code>data/</code>.</>
+                  : <>Ask questions about your SQLite database in <code>data.db</code>.</>}
               </div>
             </div>
           ) : (
-            messages.map((m) => <Message key={m.id} role={m.role} text={m.text} />)
+            messages.map((m) => <Message key={m.id} message={m} />)
           )}
 
-          {/* (4) processing animation */}
           {streaming ? <TypingBubble /> : null}
         </div>
 
@@ -322,11 +437,14 @@ export default function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Message… (Enter to send, Shift+Enter for newline)"
+              placeholder={
+                mode === "rag"
+                  ? "Ask about your documents…"
+                  : "Ask about your SQLite data…"
+              }
               rows={1}
             />
 
-            {/* (3) icon button like ChatGPT */}
             {streaming ? (
               <button className="iconBtn stop" onClick={stop} title="Stop generating">
                 ■
@@ -334,19 +452,20 @@ export default function App() {
             ) : (
               <button className="iconBtn send" onClick={() => send()} title="Send">
                 <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    fill="currentColor"
-                    d="M2 21l21-9L2 3v7l15 2-15 2v7z"
-                  />
+                  <path fill="currentColor" d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
                 </svg>
               </button>
             )}
           </div>
-          <div className="composerHint">Answers are grounded in retrieved context · streaming via Ollama</div>
+          <div className="composerHint">
+            {mode === "rag"
+              ? "RAG mode uses FAISS + local MLX model."
+              : "SQL mode returns generated SQL, raw output, and a natural-language summary."}
+          </div>
         </div>
       </div>
 
-      <SourcesPanel sources={sources} />
+      <SourcesPanel sources={sources} mode={mode} />
     </div>
   );
 }

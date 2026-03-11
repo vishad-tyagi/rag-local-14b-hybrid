@@ -2,10 +2,12 @@ from flask import Flask, Response, jsonify, render_template, request
 import json
 
 from rag_chain import SYSTEM_PROMPT, build_prompt, build_rag
+from sql_chain import SQLQueryService
 
 app = Flask(__name__)
 
 rag_chain, retriever, llm = build_rag()
+sql_service = SQLQueryService()
 
 
 @app.get("/")
@@ -97,6 +99,39 @@ def api_ask_stream():
             yield f'event: error\ndata: {json.dumps(str(e))}\n\n'
 
     return Response(sse(), mimetype="text/event-stream")
+
+
+@app.post("/api/sql/query")
+def api_sql_query():
+    payload = request.get_json(silent=True) or {}
+    question = (payload.get("question") or "").strip()
+
+    if not question:
+        return jsonify({
+            "mode": "sql",
+            "summary": "Please enter a question.",
+            "sql": "",
+            "columns": [],
+            "rows": [],
+        }), 400
+
+    try:
+        result = sql_service.run(question)
+        return jsonify({
+            "mode": "sql",
+            "summary": result["summary"],
+            "sql": result["sql"],
+            "columns": result["columns"],
+            "rows": result["rows"],
+        })
+    except Exception as e:
+        return jsonify({
+            "mode": "sql",
+            "summary": f"Error: {str(e)}",
+            "sql": "",
+            "columns": [],
+            "rows": [],
+        }), 500
 
 
 if __name__ == "__main__":

@@ -1,18 +1,22 @@
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 import torch
 from langchain_core.embeddings import Embeddings
+from langchain_core.language_models.llms import LLM
 from mlx_lm import load, generate, stream_generate
+from pydantic.v1 import PrivateAttr
 from sentence_transformers import SentenceTransformer
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHAT_MODEL = "mlx-community/Qwen2.5-3B-Instruct-4bit"
 
+_EMBED_MODEL = None
+_EMBED_DEVICE = None
+_MLX_MODEL = None
+_MLX_TOKENIZER = None
+
 
 def _embedding_device() -> str:
-    """
-    Use MPS on Apple Silicon if available, otherwise CPU.
-    """
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
@@ -20,9 +24,15 @@ def _embedding_device() -> str:
 
 class LocalEmbeddings(Embeddings):
     def __init__(self, model_name: str = EMBEDDING_MODEL):
+        global _EMBED_MODEL, _EMBED_DEVICE
         self.model_name = model_name
-        self.device = _embedding_device()
-        self.model = SentenceTransformer(self.model_name, device=self.device)
+
+        if _EMBED_MODEL is None:
+            _EMBED_DEVICE = _embedding_device()
+            _EMBED_MODEL = SentenceTransformer(self.model_name, device=_EMBED_DEVICE)
+
+        self.device = _EMBED_DEVICE
+        self.model = _EMBED_MODEL
 
     def embed_query(self, text: str) -> List[float]:
         vector = self.model.encode(text, normalize_embeddings=True)
@@ -35,13 +45,16 @@ class LocalEmbeddings(Embeddings):
 
 class MLXLocalLLM:
     def __init__(self, model_name: str = CHAT_MODEL):
+        global _MLX_MODEL, _MLX_TOKENIZER
         self.model_name = model_name
 
-        # On first run this downloads the MLX model to local HF cache.
-        # Later runs use the cached local copy.
-        self.model, self.tokenizer = load(self.model_name)
+        if _MLX_MODEL is None or _MLX_TOKENIZER is None:
+            _MLX_MODEL, _MLX_TOKENIZER = load(self.model_name)
 
-    def _format_prompt(self, prompt: str, system_prompt: str | None = None) -> str:
+        self.model = _MLX_MODEL
+        self.tokenizer = _MLX_TOKENIZER
+
+    def _format_prompt(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -56,7 +69,7 @@ class MLXLocalLLM:
     def answer(
         self,
         prompt: str,
-        system_prompt: str | None = None,
+        system_prompt: Optional[str] = None,
         max_tokens: int = 700,
     ) -> str:
         formatted_prompt = self._format_prompt(prompt, system_prompt)
@@ -68,13 +81,12 @@ class MLXLocalLLM:
             max_tokens=max_tokens,
             verbose=False,
         )
-
         return output.strip()
 
     def stream_answer(
         self,
         prompt: str,
-        system_prompt: str | None = None,
+        system_prompt: Optional[str] = None,
         max_tokens: int = 700,
     ) -> Iterable[str]:
         formatted_prompt = self._format_prompt(prompt, system_prompt)
@@ -85,5 +97,43 @@ class MLXLocalLLM:
             formatted_prompt,
             max_tokens=max_tokens,
         ):
-            if getattr(response, "text", None):
+            # FIXED: Handles both raw strings and objects depending on MLX version
+            if isinstance(response, str):
+                yield response
+            elif hasattr(response, "text") and response.text:
                 yield response.text
+            else:
+                yield str(response)
+
+class LangChainMLXLLM(LLM):
+    model_name: str = CHAT_MODEL
+    
+    # FIXED: The proper Pydantic way to handle unvalidated private attributes
+    _engine: MLXLocalLLM = PrivateAttr(default=None)
+
+    @property
+    def _llm_type(self) -> str:
+        return "mlx_local"
+
+    @property
+    def _identifying_params(self) -> dict:
+        return {"model_name": self.model_name}
+
+    def __init__(self, model_name: str = CHAT_MODEL, **kwargs):
+        super().__init__(model_name=model_name, **kwargs)
+        # Now you can assign this normally without Pydantic throwing an error
+        self._engine = MLXLocalLLM(model_name=model_name)
+
+    def _call(self, prompt: str, stop=None, run_manager=None, **kwargs) -> str:
+        text = self._engine.answer(
+            prompt=prompt,
+            system_prompt=None,
+            max_tokens=kwargs.get("max_tokens", 256),
+        )
+
+        if stop:
+            for s in stop:
+                if s in text:
+                    text = text.split(s)[0]
+
+        return text
