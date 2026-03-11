@@ -7,7 +7,6 @@ from typing import Any, Dict, List
 from sqlalchemy import create_engine
 from langchain.chains import create_sql_query_chain
 from langchain_core.prompts import PromptTemplate
-from langchain_community.tools.sql_database.tool import QuerySQLCheckerTool
 from langchain_community.utilities import SQLDatabase
 
 from hf_models import LangChainMLXLLM, MLXLocalLLM
@@ -58,30 +57,6 @@ Return ONLY SQL:
 """
 )
 
-# SQL_PROMPT = PromptTemplate.from_template(
-#     """You are an expert SQLite assistant.
-
-# Given the user's question and the database schema, write a syntactically correct SQLite query.
-
-# Rules:
-# - Return ONLY valid SQL
-# - No markdown fences
-# - No explanation
-# - Only generate read-only SQL (SELECT queries only)
-# - Use only tables and columns that exist in the schema
-# - Prefer concise queries
-# - If the user does NOT specify how many rows they want, limit results to at most {top_k} rows
-# - If the user explicitly asks for a specific number of rows, use that number in a LIMIT clause
-# - If the user explicitly asks for ALL rows, do NOT include a LIMIT clause
-
-# Schema:
-# {table_info}
-
-# Question: {input}
-
-# SQLQuery:"""
-# )
-
 
 def strip_markdown_sql(text: str) -> str:
     cleaned = text.strip()
@@ -93,7 +68,7 @@ def strip_markdown_sql(text: str) -> str:
     # Extract first SQL statement starting with SELECT or WITH
     match = re.search(r"(?is)\b(select|with)\b.*?(;|$)", cleaned)
     if match:
-        cleaned = match.group(0).strip()
+        return match.group(0).strip()
 
     return cleaned
 
@@ -136,7 +111,7 @@ def execute_read_only_sql(sql: str) -> Dict[str, Any]:
 
 class SQLQueryService:
     def __init__(self):
-        # Read-only SQLAlchemy connection for LangChain schema/query tools
+        # Read-only SQLAlchemy connection for LangChain schema inspection
         uri = f"sqlite:///file:{DB_PATH.as_posix()}?mode=ro&uri=true"
         engine = create_engine(uri, connect_args={"uri": True})
         self.db = SQLDatabase(engine)
@@ -144,6 +119,7 @@ class SQLQueryService:
         self.sql_llm = LangChainMLXLLM()
         self.summary_llm = MLXLocalLLM()
 
+        # Default top_k = 5 when user does not ask for a larger number
         self.sql_chain = create_sql_query_chain(
             llm=self.sql_llm,
             db=self.db,
@@ -151,20 +127,17 @@ class SQLQueryService:
             k=20,
         )
 
-        self.checker = QuerySQLCheckerTool(
-            db=self.db,
-            llm=self.sql_llm,
-        )
-
     def _generate_sql(self, question: str) -> str:
         raw_sql = self.sql_chain.invoke({"question": question})
         cleaned_sql = strip_markdown_sql(raw_sql)
-        checked_sql = self.checker.invoke({"query": cleaned_sql})
-        checked_sql = strip_markdown_sql(checked_sql)
-        checked_sql = ensure_read_only_sql(checked_sql)
+
         print("RAW SQL FROM LLM:", raw_sql)
         print("CLEANED SQL:", cleaned_sql)
-        return checked_sql
+
+        # Skip QuerySQLCheckerTool because local models often add prose
+        # like "Let's verify..." which breaks SQLite execution.
+        cleaned_sql = ensure_read_only_sql(cleaned_sql)
+        return cleaned_sql
 
     def _repair_sql(self, question: str, failed_sql: str, error_msg: str) -> str:
         schema = self.db.get_table_info()
@@ -193,17 +166,16 @@ Please correct the syntax and provide only the fixed SQL.
         )
 
         fixed_sql = strip_markdown_sql(fixed_sql)
-
-        try:
-            fixed_sql = self.checker.invoke({"query": fixed_sql})
-        except Exception:
-            pass
-
-        fixed_sql = strip_markdown_sql(fixed_sql)
         fixed_sql = ensure_read_only_sql(fixed_sql)
         return fixed_sql
 
-    def _summarize_result(self, question: str, sql: str, columns: List[str], rows: List[Dict[str, Any]]) -> str:
+    def _summarize_result(
+        self,
+        question: str,
+        sql: str,
+        columns: List[str],
+        rows: List[Dict[str, Any]],
+    ) -> str:
         if not rows:
             return "No rows were returned for that query."
 
