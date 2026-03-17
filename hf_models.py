@@ -8,7 +8,7 @@ from pydantic.v1 import PrivateAttr
 from sentence_transformers import SentenceTransformer
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHAT_MODEL = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+CHAT_MODEL = "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
 
 _EMBED_MODEL = None
 _EMBED_DEVICE = None
@@ -81,7 +81,9 @@ class MLXLocalLLM:
             max_tokens=max_tokens,
             verbose=False,
         )
-        return output.strip()
+        # FIX: Strip Qwen special tokens before returning
+        output = output.replace("<|im_end|>", "").replace("<|endoftext|>", "").strip()
+        return output
 
     def stream_answer(
         self,
@@ -97,13 +99,22 @@ class MLXLocalLLM:
             formatted_prompt,
             max_tokens=max_tokens,
         ):
-            # FIXED: Handles both raw strings and objects depending on MLX version
-            if isinstance(response, str):
-                yield response
-            elif hasattr(response, "text") and response.text:
-                yield response.text
+            # CHANGED: Safely handle the MLX GenerationResponse object
+            # If it has a text attribute, use it (even if empty). 
+            # This prevents the final metadata chunk from being converted to a string.
+            if hasattr(response, "text"):
+                text = response.text
+            elif isinstance(response, str):
+                text = response
             else:
-                yield str(response)
+                text = ""
+                
+            # FIX: Prevent special tokens from streaming to the frontend
+            if "<|im_end|>" in text or "<|endoftext|>" in text:
+                text = text.replace("<|im_end|>", "").replace("<|endoftext|>", "")
+            
+            if text:
+                yield text
 
 class LangChainMLXLLM(LLM):
     model_name: str = CHAT_MODEL

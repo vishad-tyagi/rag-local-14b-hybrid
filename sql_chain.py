@@ -15,66 +15,118 @@ DB_PATH = Path("data.db").resolve()
 
 SQL_SYSTEM_PROMPT = (
     "You are Butler, an expert SQLite assistant. "
-    "Return ONLY valid SQLite SQL. "
-    "Do not add markdown fences. "
-    "Do not add explanations. "
+    "Your only output must be raw, executable SQLite code. "
+    "Do not output conversational text, markdown formatting, or explanations. "
     "Only produce read-only SQL."
 )
 
+# SQL_SUMMARY_SYSTEM_PROMPT = (
+#     "You are Butler. Summarize SQL query results clearly and concisely for the user."
+# )
+
 SQL_SUMMARY_SYSTEM_PROMPT = (
-    "You are Butler. Summarize SQL query results clearly and concisely for the user."
+    "You are Butler, an expert data analyst. "
+    "Your job is to summarize the results of a SQL query in natural language. "
+    "Be concise, direct, and helpful. "
+    "Do NOT mention the SQL code itself or how the query was constructed; just explain the data results to the user."
 )
 
-SQL_PROMPT = PromptTemplate.from_template(
-    """You are an expert SQLite assistant.
 
-Your only job is to generate ONE valid SQLite query.
+
+# SQL_PROMPT = PromptTemplate.from_template(
+#     """You are a strict SQLite query generator.
+
+# Your ONLY job is to output ONE valid, read-only SQLite query. You must not output any conversational text, explanations, or formatting.
+
+# Rules:
+# - Output ONLY the raw SQL query.
+# - Do NOT wrap the SQL in markdown formatting (e.g., no ```sql).
+# - Do NOT output any tables, notes, or natural language prose (like "Here is the query...").
+# - The query MUST begin with SELECT or WITH and end with a semicolon (;).
+# - Use only tables and columns that exist in the provided schema.
+# - If the user asks for a specific item, use a WHERE clause.
+# - If the user asks for a specific number of rows, use that exact number in the LIMIT clause.
+# - If the user explicitly asks for ALL rows, omit the LIMIT clause.
+# - For counting questions, use COUNT(...).
+# - For stock or inventory questions, use the stock_quantity column.
+# - If the question implies a single best/worst/highest/lowest result (e.g., "the most", "the cheapest", "the top category"), you MUST use LIMIT 1.
+# - If the user's question uses plural terms like "items," "products," or "which ones," use LIMIT {top_k} even for superlative questions (e.g., "most expensive items").
+# - For all other queries where no specific limit or count is requested, default to LIMIT {top_k}.
+# - Use the 'AS' keyword to give meaningful names to calculated columns (e.g., AS percentage)
+
+# Schema:
+# {table_info}
+
+# Question: {input}
+
+# SQLQuery: """
+# )
+
+SQL_PROMPT = PromptTemplate.from_template(
+    """You are a strict SQLite query generator.
+
+Your ONLY job is to output ONE valid, read-only SQLite query. You must not output any conversational text, explanations, or formatting.
 
 Rules:
-- Return ONLY raw SQLite SQL
-- Return exactly ONE SQL statement
-- Do NOT include markdown fences
-- Do NOT include explanation
-- Do NOT include notes
-- Do NOT include prose such as "Here is the SQL" or "Let me"
-- Do NOT answer in natural language
-- The query must begin with SELECT or WITH
-- Only generate read-only SQL
-- Use only tables and columns that exist in the schema
-- If the user asks for a specific item, use a WHERE clause
-- If the user does NOT specify how many rows they want, limit results to at most {top_k} rows
-- If the user explicitly asks for a specific number of rows, use that number in LIMIT
-- If the user explicitly asks for ALL rows, do NOT include LIMIT
-- For counting questions, use COUNT(...)
-- For stock questions, use the stock_quantity column
+- Output ONLY the raw SQL query.
+- Do NOT wrap the SQL in markdown formatting.
+- The query MUST begin with SELECT or WITH and end with a semicolon (;).
+- Use only tables and columns that exist in the provided schema.
+- For stock or inventory questions, use the stock_quantity column.
+- Use the 'AS' keyword to give meaningful names to calculated columns.
+- QUANTITY LOGIC:
+    1. If the question asks for "the" single best/worst/highest (singular), use LIMIT 1.
+    2. If the question asks for "items", "products", or "ones" (plural), use LIMIT {top_k} even for superlative questions.
+    3. If the user specifies a number (e.g., "top 5"), use that exact LIMIT.
+    4. If the user asks for "ALL", omit the LIMIT.
+    5. Default to LIMIT {top_k} for all other general queries.
+
+Examples:
+Question: What is the most expensive product?
+SQLQuery: SELECT name, price FROM products ORDER BY price DESC LIMIT 1;
+
+Question: Show me the most expensive products.
+SQLQuery: SELECT name, price FROM products ORDER BY price DESC LIMIT {top_k};
+
+Question: Which item has the lowest stock?
+SQLQuery: SELECT name, stock_quantity FROM products ORDER BY stock_quantity ASC LIMIT 1;
 
 Schema:
 {table_info}
 
 Question: {input}
 
-Return ONLY SQL:
-"""
+SQLQuery: """
 )
 
-
 def strip_markdown_sql(text: str) -> str:
-    cleaned = text.strip()
+    # 1. Strip special LLM chat tokens like <|im_end|> FIRST
+    cleaned = re.sub(r"<\|.*?\|>", "", text.strip())
+    
+    # 2. Remove LangChain prefixes and markdown formatting
+    cleaned = re.sub(r"^SQLQuery:\s*", "", cleaned.strip(), flags=re.IGNORECASE)
     cleaned = re.sub(r"```sql", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"```", "", cleaned)
-    cleaned = re.sub(r"^SQLQuery:\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = cleaned.strip()
+    
+    # 3. Slice off hallucinated markdown tables (safely, only on new lines)
+    if "\n|" in cleaned:
+        cleaned = cleaned.split("\n|")[0]
 
-    # Extract first SQL statement starting with SELECT or WITH
+    # 4. Extract the actual SQL statement
     match = re.search(r"(?is)\b(select|with)\b.*?(;|$)", cleaned)
     if match:
         return match.group(0).strip()
 
-    return cleaned
+    return cleaned.strip()
 
 
 def ensure_read_only_sql(sql: str) -> str:
     normalized = sql.strip().lower()
+    
+    # NEW: Failsafe if the model returned something that isn't a query at all
+    if not (normalized.startswith("select") or normalized.startswith("with")):
+        raise ValueError("LLM failed to generate a valid SELECT or WITH statement.")
+
     blocked = [
         "insert", "update", "delete", "drop", "alter", "create",
         "attach", "detach", "replace", "truncate", "vacuum", "pragma"
@@ -82,9 +134,6 @@ def ensure_read_only_sql(sql: str) -> str:
 
     if any(word in normalized for word in blocked):
         raise ValueError("Only read-only SQL is allowed.")
-
-    if not (normalized.startswith("select") or normalized.startswith("with")):
-        raise ValueError("Only SELECT/CTE read-only queries are allowed.")
 
     return sql.strip()
 
@@ -129,13 +178,14 @@ class SQLQueryService:
 
     def _generate_sql(self, question: str) -> str:
         raw_sql = self.sql_chain.invoke({"question": question})
+    
+        # --- ADD THIS DEBUG LINE ---
+        print(f"\n[DEBUG] LLM RAW OUTPUT:\n{raw_sql}\n[DEBUG] END RAW\n")
+        # ---------------------------
+
         cleaned_sql = strip_markdown_sql(raw_sql)
-
-        print("RAW SQL FROM LLM:", raw_sql)
-        print("CLEANED SQL:", cleaned_sql)
-
-        # Skip QuerySQLCheckerTool because local models often add prose
-        # like "Let's verify..." which breaks SQLite execution.
+        print(f"[DEBUG] CLEANED SQL: {cleaned_sql}")
+    
         cleaned_sql = ensure_read_only_sql(cleaned_sql)
         return cleaned_sql
 
