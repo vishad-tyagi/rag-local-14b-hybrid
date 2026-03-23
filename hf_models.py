@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHAT_MODEL = "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
+# CHAT_MODEL = "mlx-community/defog-llama-3-sqlcoder-8b" 
 
 _EMBED_MODEL = None
 _EMBED_DEVICE = None

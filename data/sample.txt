@@ -1,5 +1,44 @@
-MakeMyTrip builds travel experiences for customers with curated packages and activities.
+Title: Architecting Offline Retrieval-Augmented Generation (RAG) Systems
+Author: Advanced AI Systems Group
+Date: October 2023
+Version: 2.1 (Extended Technical Reference)
 
-RAG = Retrieval-Augmented Generation: retrieve relevant context from a knowledge base and then generate a response using an LLM.
+Abstract:
+This document outlines the architecture, optimization strategies, and evaluation methodologies for building fully offline Retrieval-Augmented Generation (RAG) pipelines. By eliminating reliance on cloud APIs, organizations can ensure stringent data privacy, drastically reduce latency, and leverage localized consumer hardware for enterprise-grade natural language processing. This paper covers ingestion, embedding, vector storage, generation, and systematic evaluation.
 
-FAISS is a vector similarity search library used for fast nearest-neighbor retrieval.
+Section 1: The Ingestion Phase and Advanced Chunking
+The foundation of any RAG system is the ingestion phase, where raw, unstructured documents are parsed and split into manageable segments. The strategy used to divide this text is critical to the system's eventual accuracy. 
+The most common approach is Recursive Character Splitting. This method attempts to split text by paragraphs, then sentences, and finally words, aiming to keep related concepts together. For technical documentation, the recommended chunk size is typically between 500 and 1000 tokens, with a strict overlap of 50 to 150 tokens. This overlap prevents critical context from being severed at the chunk boundaries.
+More advanced implementations are transitioning to Semantic Chunking. Instead of using arbitrary character counts, semantic chunking uses a lightweight NLP model to analyze the meaning of sentences and dynamically groups them by topical similarity. While computationally heavier during the ingestion phase, semantic chunking has been shown to improve retrieval accuracy by up to 18% in highly technical domains.
+
+Section 2: Embedding Models and Dimensionality
+Once documents are chunked, they must be converted into dense vector representations. The choice of embedding model directly dictates the quality of the semantic search.
+For local deployments focused on speed and low memory footprint, the 'all-MiniLM-L6-v2' model from Hugging Face is the industry standard. It produces vectors with 384 dimensions and requires less than 100MB of RAM to run. 
+However, for higher accuracy, developers often utilize models like 'bge-large-en-v1.5' or 'nomic-embed-text'. The 'bge-large' model produces high-resolution vectors with 1024 dimensions. While it captures much finer semantic nuances, the resulting vector database will consume nearly three times as much storage space as one built with MiniLM, and the similarity search will require more compute.
+
+Section 3: Vector Storage and Index Optimization
+FAISS (Facebook AI Similarity Search) remains the premier library for efficient similarity search and clustering of dense vectors in memory. 
+When configuring FAISS, developers must choose an index type that balances speed against exhaustive accuracy. For datasets under 1 million vectors, 'IndexFlatL2' provides exact search results by calculating the L2 (Euclidean) distance between the query vector and every stored vector. 
+For larger, production-scale datasets, an HNSW (Hierarchical Navigable Small World) index is preferred over brute-force methods. HNSW constructs a multi-layered graph of the vector space. During a search, it traverses from the sparse upper layers down to the dense bottom layers, quickly zeroing in on the nearest neighbors. An HNSW index can search a billion vectors in milliseconds, though it requires significantly more RAM to hold the graph structure in memory compared to 'IndexFlatL2'.
+
+Section 4: Orchestration and Prompt Engineering
+LangChain is the standard orchestration framework used to bind these disparate components together. It provides specialized wrappers for document loaders, text splitters, and the vector stores themselves. 
+In a pure local setup, developers utilize LangChain's 'HuggingFaceEmbeddings' class to execute models directly via PyTorch. 
+A critical, often overlooked step in orchestration is the Prompt Template. When the retrieved chunks are passed to the LLM, they must be formatted clearly. A standard robust prompt template structure looks like this:
+"Use the following pieces of retrieved context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. 
+Context: {context} 
+Question: {question}"
+Enforcing this structure helps mitigate hallucinations and grounds the generation strictly in the retrieved facts.
+
+Section 5: Local LLM Inference and Quantization
+The final stage is generation, where the retrieved context is synthesized by a Large Language Model (LLM). Running multi-billion parameter models locally requires utilizing quantized model weights.
+The GGUF (GPT-Generated Unified Format) file structure is designed specifically for this purpose. It reduces the precision of the model weights from 16-bit floating-point (FP16) down to smaller integer formats. 
+The quantization level determines the balance between intelligence and hardware requirements. A 'Q8_0' quantization uses 8-bit integers, offering near-perfect parity with the original unquantized model but requiring substantial RAM. A 'Q4_K_M' quantization uses a mix of 4-bit and 5-bit integers; it is widely considered the "sweet spot" for consumer hardware. 
+For example, an unquantized 8-billion parameter model requires roughly 16GB of VRAM. That same model in a Q4_K_M GGUF format requires only about 4.8GB of RAM, allowing it to run smoothly on standard laptops. Inference engines natively support GGUF files and automatically hardware-accelerate generation using Apple's Metal Performance Shaders (MPS) on Mac environments, resulting in token generation speeds of 40 to 60 tokens per second.
+
+Section 6: Evaluating RAG Pipelines
+Once the pipeline is active, it must be evaluated quantitatively. The RAGAS (Retrieval Augmented Generation Assessment) framework proposes several key metrics:
+1. Context Precision: Measures if the most relevant chunks of text were ranked at the very top of the retrieved results.
+2. Context Recall: Measures if the retrieved chunks contain all the necessary information required to fully answer the user's query.
+3. Faithfulness: Measures whether the LLM's generated answer is entirely derived from the retrieved context, penalizing any external hallucinations.
+4. Answer Relevance: Measures how directly the generated answer addresses the original prompt, penalizing tangential or overly verbose responses.
