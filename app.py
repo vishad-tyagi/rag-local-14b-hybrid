@@ -1,13 +1,17 @@
 from flask import Flask, Response, jsonify, render_template, request
 import json
 
+# Your existing local imports
 from rag_chain import SYSTEM_PROMPT, build_prompt, build_rag
 from sql_chain import SQLQueryService
+from graph_chain import GraphQueryService  # New Graph Import
 
 app = Flask(__name__)
 
+# Initialize all three intelligence engines
 rag_chain, retriever, llm = build_rag()
 sql_service = SQLQueryService()
+graph_service = GraphQueryService()  # Initialize Neo4j Service
 
 
 @app.get("/")
@@ -131,6 +135,37 @@ def api_sql_query():
             "sql": "",
             "columns": [],
             "rows": [],
+        }), 500
+
+
+# --- NEW: Graph API Endpoint ---
+@app.post("/api/graph/query")
+def api_graph_query():
+    payload = request.get_json(silent=True) or {}
+    question = (payload.get("question") or "").strip()
+
+    if not question:
+        return jsonify({
+            "mode": "graph",
+            "summary": "Please enter a question.",
+            "cypher": "",
+            "results": []
+        }), 400
+
+    try:
+        result = graph_service.run(question)
+        return jsonify({
+            "mode": "graph",
+            "summary": result["summary"],
+            "cypher": result["cypher"],
+            "results": result["results"]
+        })
+    except Exception as e:
+        return jsonify({
+            "mode": "graph",
+            "summary": f"Error: {str(e)}",
+            "cypher": "",
+            "results": []
         }), 500
 
 
