@@ -54,7 +54,7 @@ def main():
             "USES", "IMPLEMENTS", "OPTIMIZES", 
             "PART_OF", "RELATED_TO", "EVALUATES"
         ]
-    );l/ 
+    );
 
     # 4. Extract and Store the Graph
     print("Extracting entities and relationships (this may take a few minutes)...")
