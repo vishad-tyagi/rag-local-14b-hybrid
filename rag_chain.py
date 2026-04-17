@@ -59,14 +59,21 @@
 
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
+from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import FAISS
 
 from hf_models import LocalEmbeddings, MLXLocalLLM
 
 VECTORSTORE_DIR = Path("vectorstore")
 INDEX_NAME = "faiss_index"
+VECTOR_K = 5
+BM25_K = 5
+FINAL_K = 5
+VECTOR_WEIGHT = 0.6
+BM25_WEIGHT = 0.4
+RRF_K = 60
 
 # UPDATED: Refined for the 7B model to allow for better synthesis 
 # while maintaining strict grounding.
@@ -102,6 +109,59 @@ QUESTION:
 HELPFUL ANSWER:"""
 
 
+def _doc_key(doc) -> Tuple[str, str]:
+    return (
+        doc.metadata.get("source", "unknown"),
+        doc.page_content,
+    )
+
+
+def _load_documents_from_vectorstore(vectorstore: FAISS) -> List:
+    docstore = getattr(vectorstore, "docstore", None)
+    docs_by_id = getattr(docstore, "_dict", {}) if docstore else {}
+    return list(docs_by_id.values())
+
+
+class HybridRetriever:
+    def __init__(
+        self,
+        vector_retriever,
+        bm25_retriever,
+        final_k: int = FINAL_K,
+        vector_weight: float = VECTOR_WEIGHT,
+        bm25_weight: float = BM25_WEIGHT,
+    ):
+        self.vector_retriever = vector_retriever
+        self.bm25_retriever = bm25_retriever
+        self.final_k = final_k
+        self.vector_weight = vector_weight
+        self.bm25_weight = bm25_weight
+
+    def _add_ranked_scores(
+        self,
+        scores: Dict[Tuple[str, str], float],
+        docs_by_key: Dict[Tuple[str, str], object],
+        docs: List,
+        weight: float,
+    ) -> None:
+        for rank, doc in enumerate(docs, start=1):
+            key = _doc_key(doc)
+            docs_by_key.setdefault(key, doc)
+            scores[key] = scores.get(key, 0.0) + weight / (RRF_K + rank)
+
+    def invoke(self, question: str) -> List:
+        vector_docs = self.vector_retriever.invoke(question)
+        bm25_docs = self.bm25_retriever.invoke(question)
+
+        scores = {}
+        docs_by_key = {}
+        self._add_ranked_scores(scores, docs_by_key, vector_docs, self.vector_weight)
+        self._add_ranked_scores(scores, docs_by_key, bm25_docs, self.bm25_weight)
+
+        ranked_keys = sorted(scores, key=scores.get, reverse=True)
+        return [docs_by_key[key] for key in ranked_keys[: self.final_k]]
+
+
 def build_rag() -> Tuple:
     index_path = VECTORSTORE_DIR / INDEX_NAME
     if not index_path.exists():
@@ -119,7 +179,16 @@ def build_rag() -> Tuple:
     )
 
     # Increased k to 5 to take advantage of the 7B model's larger context window
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    vector_retriever = vectorstore.as_retriever(search_kwargs={"k": VECTOR_K})
+
+    documents = _load_documents_from_vectorstore(vectorstore)
+    if not documents:
+        raise ValueError("No documents found in FAISS docstore. Run: python ingest.py")
+
+    bm25_retriever = BM25Retriever.from_documents(documents)
+    bm25_retriever.k = BM25_K
+
+    retriever = HybridRetriever(vector_retriever, bm25_retriever)
     llm = MLXLocalLLM()
 
     class RAGChain:
