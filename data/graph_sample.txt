@@ -1,0 +1,53 @@
+Title: Offline RAG Knowledge Graph Test Set
+
+Butler is a local assistant for offline RAG systems.
+A RAG Pipeline USES LangChain.
+A RAG Pipeline USES FAISS.
+A RAG Pipeline USES an Embedding Model.
+A RAG Pipeline USES a Local LLM.
+
+LangChain is a Library.
+LangChain USES Prompt Templates.
+LangChain RELATED_TO Orchestration.
+
+FAISS is a Library.
+FAISS IMPLEMENTS IndexFlatL2.
+FAISS IMPLEMENTS HNSW.
+HNSW is an IndexType.
+IndexFlatL2 is an IndexType.
+HNSW OPTIMIZES Search Speed.
+IndexFlatL2 OPTIMIZES Exact Retrieval.
+
+all-MiniLM-L6-v2 is a Model.
+all-MiniLM-L6-v2 RELATED_TO Embeddings.
+all-MiniLM-L6-v2 RELATED_TO 384 Dimensions.
+
+bge-large-en-v1.5 is a Model.
+bge-large-en-v1.5 RELATED_TO Embeddings.
+bge-large-en-v1.5 RELATED_TO 1024 Dimensions.
+
+Qwen2.5-Coder-14B-Instruct-4bit is a Model.
+Qwen2.5-Coder-14B-Instruct-4bit PART_OF Local Inference.
+Qwen2.5-Coder-14B-Instruct-4bit RELATED_TO MLX.
+
+Prompt Template is a Concept.
+Prompt Template OPTIMIZES Faithfulness.
+Chunk Overlap is a Concept.
+Chunk Overlap OPTIMIZES Context Preservation.
+Semantic Chunking is a Concept.
+Semantic Chunking OPTIMIZES Retrieval Accuracy.
+
+RAGAS is a Technology.
+RAGAS EVALUATES Faithfulness.
+RAGAS EVALUATES Context Precision.
+RAGAS EVALUATES Context Recall.
+RAGAS EVALUATES Answer Relevance.
+
+Faithfulness is a Metric.
+Context Precision is a Metric.
+Context Recall is a Metric.
+Answer Relevance is a Metric.
+
+Neo4j is a Technology.
+Neo4j RELATED_TO Knowledge Graphs.
+Knowledge Graphs RELATED_TO Entity Relationships.

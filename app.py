@@ -1,17 +1,34 @@
 from flask import Flask, Response, jsonify, render_template, request
 import json
 
-# Your existing local imports
 from rag_chain import SYSTEM_PROMPT, build_prompt, build_rag
 from sql_chain import SQLQueryService
-from graph_chain import GraphQueryService  # New Graph Import
+
+try:
+    from graph_chain import GraphQueryService
+    GRAPH_IMPORT_ERROR = None
+except Exception as exc:
+    GraphQueryService = None
+    GRAPH_IMPORT_ERROR = str(exc)
 
 app = Flask(__name__)
 
-# Initialize all three intelligence engines
 rag_chain, retriever, llm = build_rag()
 sql_service = SQLQueryService()
-graph_service = GraphQueryService()  # Initialize Neo4j Service
+graph_service = None
+
+
+def get_graph_service():
+    global graph_service
+
+    if graph_service is not None:
+        return graph_service
+
+    if GraphQueryService is None:
+        raise RuntimeError(f"Graph mode is unavailable: {GRAPH_IMPORT_ERROR}")
+
+    graph_service = GraphQueryService()
+    return graph_service
 
 
 @app.get("/")
@@ -138,7 +155,6 @@ def api_sql_query():
         }), 500
 
 
-# --- NEW: Graph API Endpoint ---
 @app.post("/api/graph/query")
 def api_graph_query():
     payload = request.get_json(silent=True) or {}
@@ -153,7 +169,7 @@ def api_graph_query():
         }), 400
 
     try:
-        result = graph_service.run(question)
+        result = get_graph_service().run(question)
         return jsonify({
             "mode": "graph",
             "summary": result["summary"],
