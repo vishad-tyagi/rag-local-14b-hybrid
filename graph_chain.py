@@ -39,6 +39,16 @@ Instructions:
 5. RELATIONSHIPS:
    - Prefer explicit relationship types from the schema when clearly relevant.
    - If the exact relationship is unclear, use a generic undirected relationship pattern like `-[r]-` instead of guessing.
+   - For banking relationship wording, prefer these mappings when present in the schema:
+     * customer owns account -> OWNS
+     * customer connected to branch, branch customers, onboarded at branch -> ONBOARDED_AT
+     * customer risk segment -> HAS_RISK_SEGMENT
+     * account paid merchant, account connected to merchant, merchant paid by account -> PAID_TO
+     * alert triggered by account -> TRIGGERED_BY
+     * alert applies to customer -> APPLIES_TO
+     * alert or risk segment requires policy/review -> REQUIRES
+     * merchant subject to review/policy -> SUBJECT_TO
+   - Do not use RELATED_TO for branch, account, merchant, alert, or policy questions unless the schema shows no more specific relationship.
 
 6. QUERY SIMPLICITY:
    - Prefer the simplest valid query that answers the question.
@@ -52,13 +62,13 @@ Instructions:
    - Return ONLY the raw Cypher query.
    - No markdown, no explanations, no backticks, no prefix text.
 
-Choose the best pattern based on the question:
+Choose the best pattern based on the question. The current sample graph represents banking risk relationships such as customers, accounts, branches, merchants, alerts, risk segments, and policies.
 
 PATTERN A - Single Entity Discovery
-Example question: "What is connected to FAISS?"
+Example question: "What is connected to Asha Rao?"
 Example query:
 MATCH (n)
-WHERE toLower(coalesce(n.id, n.name, '')) CONTAINS toLower('faiss')
+WHERE toLower(coalesce(n.id, n.name, '')) CONTAINS toLower('asha rao')
   AND NOT n:Document
 OPTIONAL MATCH (n)-[r]-(m)
 WHERE NOT m:Document
@@ -66,28 +76,28 @@ RETURN n, r, m
 LIMIT 25
 
 PATTERN B - Category Listing
-Example question: "List all Metrics and Models"
+Example question: "List all Customers and Merchants"
 Example query:
 MATCH (n)
-WHERE (n:Metric OR n:Model) AND NOT n:Document
+WHERE (n:Customer OR n:Merchant) AND NOT n:Document
 RETURN n
 LIMIT 25
 
 PATTERN C - Two-Entity Connection
-Example question: "How is X related to Y?"
+Example question: "How is Asha Rao related to Northstar Crypto Exchange?"
 Example query:
-MATCH p = (a)-[*1..2]-(b)
-WHERE toLower(coalesce(a.id, a.name, '')) CONTAINS toLower('x')
-  AND toLower(coalesce(b.id, b.name, '')) CONTAINS toLower('y')
+MATCH p = (a)-[*1..4]-(b)
+WHERE toLower(coalesce(a.id, a.name, '')) CONTAINS toLower('asha rao')
+  AND toLower(coalesce(b.id, b.name, '')) CONTAINS toLower('northstar crypto exchange')
   AND NOT a:Document
   AND NOT b:Document
 RETURN p
 LIMIT 5
 
 PATTERN D - Count / Aggregation
-Example question: "How many Metrics are there?"
+Example question: "How many Customers are there?"
 Example query:
-MATCH (n:Metric)
+MATCH (n:Customer)
 WHERE NOT n:Document
 RETURN count(n) AS count
 
@@ -101,36 +111,41 @@ ORDER BY connections DESC
 LIMIT 10
 
 PATTERN F - Multi-Entity Connection
-Example question: "How is X related to Y and Z?"
+Example question: "Show the relationship between Asha Rao, ACCT-9001, and Northstar Crypto Exchange."
 Example query:
-MATCH p = (a)-[*1..2]-(b)
-WHERE toLower(coalesce(a.id, a.name, '')) CONTAINS toLower('x')
-  AND (
-    toLower(coalesce(b.id, b.name, '')) CONTAINS toLower('y')
-    OR toLower(coalesce(b.id, b.name, '')) CONTAINS toLower('z')
-  )
+MATCH p = (a)-[*1..4]-(c)
+WHERE toLower(coalesce(a.id, a.name, '')) CONTAINS toLower('asha rao')
+  AND toLower(coalesce(c.id, c.name, '')) CONTAINS toLower('northstar crypto exchange')
   AND NOT a:Document
-  AND NOT b:Document
+  AND NOT c:Document
+  AND any(node IN nodes(p) WHERE toLower(coalesce(node.id, node.name, '')) CONTAINS toLower('acct-9001'))
 RETURN p
 LIMIT 8
 
-PATTERN G - Relationship Target Lookup
-Example question: "What concepts optimize retrieval accuracy or faithfulness?"
+PATTERN G - Branch Relationship Lookup
+Example question: "Which customers are connected to Downtown Branch?"
 Example query:
-MATCH (c:Concept)-[r:OPTIMIZES]->(target)
-WHERE NOT c:Document
-  AND NOT target:Document
-  AND (
-    toLower(coalesce(target.id, target.name, '')) CONTAINS toLower('retrieval accuracy')
-    OR toLower(coalesce(target.id, target.name, '')) CONTAINS toLower('faithfulness')
-  )
-RETURN c, r, target
+MATCH (customer:Customer)-[r:ONBOARDED_AT]->(branch:Branch)
+WHERE toLower(coalesce(branch.id, branch.name, '')) CONTAINS toLower('downtown branch')
+  AND NOT customer:Document
+  AND NOT branch:Document
+RETURN customer, r, branch
 LIMIT 25
 
-Example question: "What does RAGAS evaluate?"
+PATTERN H - Relationship Target Lookup
+Example question: "Which alerts require Urgent AML Review?"
 Example query:
-MATCH (source)-[r:EVALUATES]->(target)
-WHERE toLower(coalesce(source.id, source.name, '')) CONTAINS toLower('ragas')
+MATCH (source)-[r:REQUIRES]->(target)
+WHERE NOT source:Document
+  AND NOT target:Document
+  AND toLower(coalesce(target.id, target.name, '')) CONTAINS toLower('urgent aml review')
+RETURN source, r, target
+LIMIT 25
+
+Example question: "Which accounts paid to GlobeRemit Services?"
+Example query:
+MATCH (source)-[r:PAID_TO]->(target)
+WHERE toLower(coalesce(target.id, target.name, '')) CONTAINS toLower('globeremit services')
   AND NOT source:Document
   AND NOT target:Document
 RETURN source, r, target
@@ -213,6 +228,10 @@ def _ensure_read_only_cypher(cypher: str) -> str:
     return cypher.strip()
 
 
+def _contains_any(text: str, terms: list[str]) -> bool:
+    return any(term in text for term in terms)
+
+
 class GraphQueryService:
     def __init__(self):
         self.graph = Neo4jGraph(
@@ -245,12 +264,95 @@ class GraphQueryService:
         )
         return self.summary_llm.answer(prompt, max_tokens=220).strip()
 
+    def _fallback_cypher(self, question: str) -> str | None:
+        q = question.lower()
+
+        if "urgent aml review" in q and _contains_any(q, ["alert", "alerts", "require", "requires"]):
+            return """
+MATCH (alert:Alert)-[r:REQUIRES]->(policy:Policy)
+WHERE toLower(coalesce(policy.id, policy.name, '')) CONTAINS toLower('urgent aml review')
+  AND NOT alert:Document
+  AND NOT policy:Document
+RETURN alert, r, policy
+LIMIT 25
+""".strip()
+
+        branch_names = {
+            "downtown": "downtown branch",
+            "lakeside": "lakeside branch",
+            "airport": "airport branch",
+            "capital market": "capital market branch",
+        }
+        for branch_key, branch_name in branch_names.items():
+            if branch_key in q and _contains_any(q, ["customer", "customers", "connected", "onboarded", "branch"]):
+                return f"""
+MATCH (customer:Customer)-[r:ONBOARDED_AT]->(branch:Branch)
+WHERE toLower(coalesce(branch.id, branch.name, '')) CONTAINS toLower('{branch_name}')
+  AND NOT customer:Document
+  AND NOT branch:Document
+RETURN customer, r, branch
+LIMIT 25
+""".strip()
+
+        merchant_names = {
+            "northstar": "northstar crypto exchange",
+            "globeremit": "globeremit services",
+            "city utilities": "city utilities",
+            "metro payroll": "metro payroll services",
+            "airport atm": "airport atm network",
+        }
+        for merchant_key, merchant_name in merchant_names.items():
+            if merchant_key in q and (
+                "asha" in q
+                or _contains_any(q, ["account", "accounts", "paid", "merchant", "connected", "relationship", "path"])
+            ):
+                if "asha" in q:
+                    return f"""
+MATCH p = (customer:Customer)-[*1..4]-(merchant:Merchant)
+WHERE toLower(coalesce(customer.id, customer.name, '')) CONTAINS toLower('asha rao')
+  AND toLower(coalesce(merchant.id, merchant.name, '')) CONTAINS toLower('{merchant_name}')
+  AND NOT customer:Document
+  AND NOT merchant:Document
+RETURN p
+LIMIT 8
+""".strip()
+
+                return f"""
+MATCH (account:Account)-[r:PAID_TO]->(merchant:Merchant)
+WHERE toLower(coalesce(merchant.id, merchant.name, '')) CONTAINS toLower('{merchant_name}')
+  AND NOT account:Document
+  AND NOT merchant:Document
+RETURN account, r, merchant
+LIMIT 25
+""".strip()
+
+        account_match = re.search(r"\bacct-\d+\b", q)
+        if account_match and _contains_any(q, ["relationship", "connected", "path"]):
+            account_id = account_match.group(0)
+            return f"""
+MATCH p = (left)-[*1..4]-(right)
+WHERE any(node IN nodes(p) WHERE toLower(coalesce(node.id, node.name, '')) CONTAINS toLower('{account_id}'))
+  AND NOT left:Document
+  AND NOT right:Document
+RETURN p
+LIMIT 8
+""".strip()
+
+        return None
+
     def run(self, question: str) -> Dict[str, Any]:
         cypher_query = self._generate_cypher(question)
         print(f"[DEBUG] Generated Cypher: {cypher_query}")
 
         try:
             results = self.graph.query(cypher_query)
+            fallback_cypher = self._fallback_cypher(question)
+            if not results and fallback_cypher and fallback_cypher != cypher_query:
+                fallback_results = self.graph.query(fallback_cypher)
+                if fallback_results:
+                    cypher_query = fallback_cypher
+                    results = fallback_results
+
             summary = self._summarize_results(question, results)
             return {
                 "cypher": cypher_query,

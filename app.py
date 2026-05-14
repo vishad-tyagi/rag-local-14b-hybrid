@@ -1,6 +1,8 @@
 from flask import Flask, Response, jsonify, render_template, request
 import json
+from pathlib import Path
 
+from auto_chain import AutoQueryService
 from rag_chain import SYSTEM_PROMPT, build_prompt, build_rag
 from sql_chain import SQLQueryService
 
@@ -16,6 +18,7 @@ app = Flask(__name__)
 rag_chain, retriever, llm = build_rag()
 sql_service = SQLQueryService()
 graph_service = None
+auto_service = None
 
 
 def get_graph_service():
@@ -31,9 +34,48 @@ def get_graph_service():
     return graph_service
 
 
+def get_auto_service():
+    global auto_service
+
+    if auto_service is None:
+        auto_service = AutoQueryService(
+            rag_chain=rag_chain,
+            retriever=retriever,
+            llm=llm,
+            sql_service=sql_service,
+            graph_service_factory=get_graph_service,
+        )
+
+    return auto_service
+
+
 @app.get("/")
 def home():
     return render_template("index.html", answer=None, question=None, sources=None)
+
+
+@app.get("/api/health")
+def api_health():
+    index_dir = Path("vectorstore/faiss_index")
+    db_path = Path("data.db")
+
+    return jsonify({
+        "status": "ok",
+        "modes": ["rag", "sql", "graph", "auto"],
+        "rag": {
+            "available": (index_dir / "index.faiss").exists() and (index_dir / "index.pkl").exists(),
+            "index_path": str(index_dir),
+        },
+        "sql": {
+            "available": db_path.exists(),
+            "db_path": str(db_path),
+        },
+        "graph": {
+            "import_available": GraphQueryService is not None,
+            "import_error": GRAPH_IMPORT_ERROR,
+            "connection_checked": False,
+        },
+    })
 
 
 @app.post("/ask")
@@ -182,6 +224,56 @@ def api_graph_query():
             "summary": f"Error: {str(e)}",
             "cypher": "",
             "results": []
+        }), 500
+
+
+@app.post("/api/auto/query")
+def api_auto_query():
+    payload = request.get_json(silent=True) or {}
+    question = (payload.get("question") or "").strip()
+
+    if not question:
+        return jsonify({
+            "mode": "auto",
+            "selected_modes": [],
+            "route": {
+                "confidence": 0.0,
+                "reason": "Please enter a question.",
+                "router": "none",
+                "requires_synthesis": False,
+            },
+            "answer": "Please enter a question.",
+            "sources": [],
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "cypher": "",
+            "results": [],
+            "pipeline_outputs": {},
+            "partial_errors": [],
+        }), 400
+
+    try:
+        return jsonify(get_auto_service().run(question))
+    except Exception as e:
+        return jsonify({
+            "mode": "auto",
+            "selected_modes": [],
+            "route": {
+                "confidence": 0.0,
+                "reason": f"Error: {str(e)}",
+                "router": "error",
+                "requires_synthesis": False,
+            },
+            "answer": f"Error: {str(e)}",
+            "sources": [],
+            "sql": "",
+            "columns": [],
+            "rows": [],
+            "cypher": "",
+            "results": [],
+            "pipeline_outputs": {},
+            "partial_errors": [{"mode": "auto", "error": str(e)}],
         }), 500
 
 

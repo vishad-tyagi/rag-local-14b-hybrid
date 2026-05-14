@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-const STORAGE_KEY = "rag_chat_history_react_v4";
+const STORAGE_KEY = "rag_chat_history_react_v5";
 
 function loadHistory() {
   try {
@@ -48,10 +48,10 @@ function Sidebar({ onNewChat, quickPrompts, onPickPrompt, mode, setMode }) {
     <div className="sidebar">
       <div className="sideTop">
         <div className="sideBrand">
-          <div className="sideLogo">R</div>
+          <div className="sideLogo">B</div>
           <div>
-            <div className="sideTitle">Local RAG</div>
-            <div className="sideSub">Flask + FAISS + MLX</div>
+            <div className="sideTitle">Bank Butler</div>
+            <div className="sideSub">RAG + SQL + Graph + AUTO</div>
           </div>
         </div>
 
@@ -82,6 +82,12 @@ function Sidebar({ onNewChat, quickPrompts, onPickPrompt, mode, setMode }) {
           >
             Graph
           </button>
+          <button
+            className={`modeBtn ${mode === "auto" ? "active" : ""}`}
+            onClick={() => setMode("auto")}
+          >
+            AUTO
+          </button>
         </div>
       </div>
 
@@ -100,7 +106,7 @@ function Sidebar({ onNewChat, quickPrompts, onPickPrompt, mode, setMode }) {
         <div className="sideSectionTitle">Tips</div>
         <div className="sideTip">
           {/* --- UPDATED: Added Neo4j tip --- */}
-          RAG mode uses <code>data/</code>. SQL mode uses <code>data.db</code>. Graph mode uses <code>Neo4j</code>.
+          RAG mode uses <code>data/</code>. SQL mode uses <code>data.db</code>. Graph mode uses <code>Neo4j</code>. AUTO routes for you.
         </div>
       </div>
     </div>
@@ -108,18 +114,26 @@ function Sidebar({ onNewChat, quickPrompts, onPickPrompt, mode, setMode }) {
 }
 
 function SourcesPanel({ sources, mode }) {
+  const canShowSources = mode === "rag" || mode === "auto";
+
   return (
     <div className="sourcesPanel">
       <div className="sourcesHeader">
         <div className="sourcesTitle">Context</div>
         <div className="sourcesMeta">
           {/* --- UPDATED: Header text for Graph mode --- */}
-          {mode === "rag" ? "Retrieved chunks" : mode === "sql" ? "SQL mode doesn't use document chunks" : "Graph mode uses Neo4j relationships"}
+          {mode === "rag"
+            ? "Retrieved chunks"
+            : mode === "sql"
+            ? "SQL mode doesn't use document chunks"
+            : mode === "graph"
+            ? "Graph mode uses Neo4j relationships"
+            : "AUTO shows chunks when RAG is selected"}
         </div>
       </div>
 
       <div className="sourcesBody">
-        {mode !== "rag" ? (
+        {!canShowSources ? (
           <div className="sourcesEmpty">Switch back to RAG mode to see retrieved sources here.</div>
         ) : sources?.length ? (
           <div className="sourcesList">
@@ -137,7 +151,7 @@ function SourcesPanel({ sources, mode }) {
             ))}
           </div>
         ) : (
-          <div className="sourcesEmpty">Ask a question in RAG mode to see retrieved context here.</div>
+          <div className="sourcesEmpty">Ask a RAG or AUTO question that needs documents to see retrieved context here.</div>
         )}
       </div>
     </div>
@@ -173,6 +187,10 @@ function ResultTable({ columns, rows }) {
 
 function Message({ message }) {
   const isUser = message.role === "user";
+  const hasSql = !isUser && (message.mode === "sql" || (message.mode === "auto" && message.sql));
+  const hasGraph = !isUser && (message.mode === "graph" || (message.mode === "auto" && message.cypher));
+  const hasAutoRoute = !isUser && message.mode === "auto";
+  const selectedModes = message.selected_modes?.length ? message.selected_modes.join(" + ").toUpperCase() : "Unknown";
 
   return (
     <div className={`msgRow ${isUser ? "user" : "assistant"}`}>
@@ -180,7 +198,28 @@ function Message({ message }) {
       <div className="msgBubble">
         <div className="msgText">{message.text}</div>
 
-        {!isUser && message.mode === "sql" ? (
+        {hasAutoRoute ? (
+          <div className="sqlBlock">
+            <details open>
+              <summary>AUTO route</summary>
+              <pre className="sqlCode">
+                {`Selected modes: ${selectedModes}
+Router: ${message.route?.router || "unknown"}
+Confidence: ${typeof message.route?.confidence === "number" ? message.route.confidence.toFixed(2) : "n/a"}
+Reason: ${message.route?.reason || "No route reason returned."}`}
+              </pre>
+            </details>
+
+            {message.partial_errors?.length ? (
+              <details>
+                <summary>Partial pipeline errors</summary>
+                <pre className="sqlCode">{JSON.stringify(message.partial_errors, null, 2)}</pre>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+
+        {hasSql ? (
           <div className="sqlBlock">
             <details open>
               <summary>Generated SQL</summary>
@@ -195,7 +234,7 @@ function Message({ message }) {
         ) : null}
 
         {/* --- NEW: Graph Mode Message Rendering --- */}
-        {!isUser && message.mode === "graph" ? (
+        {hasGraph ? (
           <div className="sqlBlock">
             <details open>
               <summary>Generated Cypher</summary>
@@ -247,21 +286,27 @@ export default function App() {
     // --- UPDATED: Added Graph mode quick prompts ---
     if (mode === "rag") {
       return [
-        { label: "Summarize docs", q: "Summarize the key points in the documents." },
-        { label: "What is RAG?", q: "What is RAG and how does it work?" },
-        { label: "Topics + sources", q: "List the main topics covered and where they appear." },
+        { label: "Urgent AML policy", q: "What does Meridian Trust Bank consider an urgent AML alert?" },
+        { label: "EDD guidance", q: "When should enhanced due diligence be performed?" },
+        { label: "Branch context", q: "How should branch context be used during risk review?" },
       ];
     } else if (mode === "sql") {
       return [
-        { label: "Inventory value", q: "What is the total inventory value for each product?" },
-        { label: "Low stock", q: "Which products have stock quantity less than 20?" },
-        { label: "Average price", q: "What is the average price by category?" },
+        { label: "Urgent alerts", q: "Which customers have open AML alerts with scores above 80?" },
+        { label: "Crypto total", q: "What is the total amount transferred to Northstar Crypto Exchange?" },
+        { label: "Largest loan", q: "Which customer has the highest outstanding loan balance?" },
+      ];
+    } else if (mode === "graph") {
+      return [
+        { label: "Asha path", q: "How is Asha Rao connected to Northstar Crypto Exchange?" },
+        { label: "Urgent review", q: "Which alerts require Urgent AML Review?" },
+        { label: "Downtown links", q: "Which customers are connected to Downtown Branch?" },
       ];
     } else {
       return [
-        { label: "Find connections", q: "How is FAISS connected to HNSW?" },
-        { label: "List entities", q: "What algorithms and concepts are mentioned in the graph?" },
-        { label: "Graph overview", q: "Summarize the main entities in the knowledge graph." },
+        { label: "Asha escalation", q: "Does Asha Rao need escalation? Use her alert score, account relationships, and the bank policy." },
+        { label: "Risk + merchants", q: "Which high-risk customers have open alerts, and what merchants are their accounts connected to?" },
+        { label: "Compare reviews", q: "Compare Asha Rao and Carlos Diaz from a risk review perspective using available records, relationships, and policy guidance." },
       ];
     }
   }, [mode]);
@@ -297,6 +342,46 @@ export default function App() {
     setMessages((prev) => clamp([...prev, userMsg]));
     setInput("");
     setStreaming(true);
+
+    if (mode === "auto") {
+      setSources([]);
+      try {
+        const res = await fetch("/api/auto/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q }),
+        });
+
+        const data = await res.json();
+        setSources(data.sources || []);
+
+        const assistantMsg = {
+          id: uid(),
+          role: "assistant",
+          mode: "auto",
+          text: data.answer || "No answer returned.",
+          selected_modes: data.selected_modes || [],
+          route: data.route || {},
+          sources: data.sources || [],
+          sql: data.sql || "",
+          columns: data.columns || [],
+          rows: data.rows || [],
+          cypher: data.cypher || "",
+          results: data.results || [],
+          partial_errors: data.partial_errors || [],
+        };
+
+        setMessages((prev) => clamp([...prev, assistantMsg]));
+      } catch (e) {
+        setMessages((prev) =>
+          clamp([...prev, { id: uid(), role: "assistant", mode: "auto", text: `Error: ${String(e)}` }])
+        );
+      } finally {
+        setStreaming(false);
+        inputRef.current?.focus();
+      }
+      return;
+    }
 
     if (mode === "sql") {
       setSources([]);
@@ -460,6 +545,37 @@ export default function App() {
     inputRef.current?.focus();
   }
 
+  const modeTitle = {
+    rag: "RAG Chat",
+    sql: "SQL Chat",
+    graph: "Graph Chat",
+    auto: "AUTO Chat",
+  }[mode];
+  const modeMeta = {
+    rag: "Document policy Q&A",
+    sql: "Text-to-SQL on bank records",
+    graph: "Text-to-Cypher on banking relationships",
+    auto: "Smart routing across policy, records, and relationships",
+  }[mode];
+  const emptyTitle = {
+    rag: "Policy document mode",
+    sql: "Banking SQL mode",
+    graph: "Banking relationship graph mode",
+    auto: "AUTO routing mode",
+  }[mode];
+  const placeholder = {
+    rag: "Ask about bank policy documents...",
+    sql: "Ask about structured bank records...",
+    graph: "Ask about banking relationships...",
+    auto: "Ask anything; AUTO will choose the right pipeline...",
+  }[mode];
+  const composerHint = {
+    rag: "RAG mode answers from policy text in data/.",
+    sql: "SQL mode returns generated SQL, raw output, and a natural-language summary.",
+    graph: "Graph mode returns generated Cypher queries, raw JSON relationships, and a summary.",
+    auto: "AUTO mode routes to RAG, SQL, Graph, or a true hybrid only when needed.",
+  }[mode];
+
   return (
     <div className="appShell">
       <Sidebar
@@ -474,11 +590,11 @@ export default function App() {
         <div className="topBar">
           <div className="topTitle">
             {/* --- UPDATED: Dynamic Title --- */}
-            {mode === "rag" ? "RAG Chat" : mode === "sql" ? "SQL Chat" : "Graph Chat"}
+            {modeTitle}
           </div>
           <div className="topMeta">
             {/* --- UPDATED: Dynamic Subtitle --- */}
-            {mode === "rag" ? "Document Q&A" : mode === "sql" ? "Text-to-SQL on data.db" : "Text-to-Cypher on Neo4j"}
+            {modeMeta}
           </div>
         </div>
 
@@ -487,15 +603,17 @@ export default function App() {
             <div className="empty">
               <div className="emptyTitle">
                 {/* --- UPDATED: Dynamic Empty State Title --- */}
-                {mode === "rag" ? "Local RAG mode" : mode === "sql" ? "Text-to-SQL mode" : "Knowledge Graph mode"}
+                {emptyTitle}
               </div>
               <div className="emptySub">
                 {/* --- UPDATED: Dynamic Empty State Text --- */}
                 {mode === "rag"
-                  ? <>Ask questions about your files in <code>data/</code>.</>
+                  ? <>Ask questions about banking policy files in <code>data/</code>.</>
                   : mode === "sql" 
-                  ? <>Ask questions about your SQLite database in <code>data.db</code>.</>
-                  : <>Discover relationships and connections in your <code>Neo4j</code> database.</>}
+                  ? <>Ask questions about banking tables in <code>data.db</code>.</>
+                  : mode === "graph"
+                  ? <>Discover customer, account, merchant, alert, and policy relationships in <code>Neo4j</code>.</>
+                  : <>Let AUTO choose policy, records, relationships, or a focused hybrid.</>}
               </div>
             </div>
           ) : (
@@ -515,11 +633,7 @@ export default function App() {
               onKeyDown={onKeyDown}
               placeholder={
                 // --- UPDATED: Dynamic Placeholder ---
-                mode === "rag"
-                  ? "Ask about your documents…"
-                  : mode === "sql"
-                  ? "Ask about your SQLite data…"
-                  : "Ask about connections in your graph…"
+                placeholder
               }
               rows={1}
             />
@@ -538,11 +652,7 @@ export default function App() {
           </div>
           <div className="composerHint">
             {/* --- UPDATED: Dynamic Hint Text --- */}
-            {mode === "rag"
-              ? "RAG mode uses FAISS + local MLX model."
-              : mode === "sql" 
-              ? "SQL mode returns generated SQL, raw output, and a natural-language summary."
-              : "Graph mode returns generated Cypher queries, raw JSON relationships, and a summary."}
+            {composerHint}
           </div>
         </div>
       </div>

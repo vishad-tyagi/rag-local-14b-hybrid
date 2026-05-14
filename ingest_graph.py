@@ -28,6 +28,13 @@ ALLOWED_NODE_LABELS = {
     "IndexType",
     "Assistant",
     "Pipeline",
+    "Customer",
+    "Account",
+    "Branch",
+    "Merchant",
+    "Alert",
+    "RiskSegment",
+    "Policy",
 }
 ALLOWED_RELATIONSHIPS = {
     "USES",
@@ -36,6 +43,14 @@ ALLOWED_RELATIONSHIPS = {
     "PART_OF",
     "RELATED_TO",
     "EVALUATES",
+    "OWNS",
+    "ONBOARDED_AT",
+    "HAS_RISK_SEGMENT",
+    "PAID_TO",
+    "TRIGGERED_BY",
+    "APPLIES_TO",
+    "REQUIRES",
+    "SUBJECT_TO",
 }
 
 
@@ -53,8 +68,11 @@ def _extract_structured_facts(text: str):
         r"^(?P<entity>.+?)\s+is\s+(?:a|an)\s+(?P<label>[A-Za-z]+)\.$",
         flags=re.IGNORECASE,
     )
+    relationship_names = "|".join(
+        sorted((re.escape(name) for name in ALLOWED_RELATIONSHIPS), key=len, reverse=True)
+    )
     relationship_pattern = re.compile(
-        r"^(?P<source>.+?)\s+(?P<relationship>USES|IMPLEMENTS|OPTIMIZES|PART_OF|RELATED_TO|EVALUATES)\s+(?P<target>.+?)\.$"
+        rf"^(?P<source>.+?)\s+(?P<relationship>{relationship_names})\s+(?P<target>.+?)\.$"
     )
 
     for raw_line in text.splitlines():

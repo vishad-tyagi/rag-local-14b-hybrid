@@ -8,6 +8,9 @@ tiktoken==0.7.0
 sentence-transformers==3.0.1
 torch==2.4.1
 transformers==4.44.2
+numpy==1.26.4
+packaging==24.2
+mlx==0.31.1
 mlx-lm==0.20.6
 
 sqlalchemy==2.0.35

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -12,6 +13,7 @@ from langchain_community.utilities import SQLDatabase
 from hf_models import LangChainMLXLLM, MLXLocalLLM
 
 DB_PATH = Path("data.db").resolve()
+DEBUG_SQL = os.getenv("DEBUG_SQL", "false").lower() == "true"
 
 SQL_SYSTEM_PROMPT = (
     "You are Butler, an expert SQLite assistant. "
@@ -63,7 +65,7 @@ SQL_SUMMARY_SYSTEM_PROMPT = (
 # )
 
 SQL_PROMPT = PromptTemplate.from_template(
-    """You are a strict SQLite query generator.
+    """You are a strict SQLite query generator for a banking analytics database.
 
 Your ONLY job is to output ONE valid, read-only SQLite query. You must not output any conversational text, explanations, or formatting.
 
@@ -72,24 +74,39 @@ Rules:
 - Do NOT wrap the SQL in markdown formatting.
 - The query MUST begin with SELECT or WITH and end with a semicolon (;).
 - Use only tables and columns that exist in the provided schema.
-- For stock or inventory questions, use the stock_quantity column.
+- Generate read-only SQL only.
+- Use explicit JOINs when a question requires fields from multiple tables.
 - Use the 'AS' keyword to give meaningful names to calculated columns.
+- For customer names, account IDs, alert IDs, branch names, and merchant names, use case-insensitive matching with LOWER(...) when helpful.
+- If the user asks for urgent AML alerts, interpret urgent as alert_score >= 80.
+- If the user asks for open alerts, use aml_alerts.status = 'Open'.
+- If the user asks for high-risk customers, use customers.risk_segment = 'High'.
+- If the user asks for elevated credit exposure, use loans.outstanding_usd > 50000 and customers.risk_segment IN ('Medium', 'High').
+- If the user asks for transaction totals by merchant, counterparty, payee, or receiver, group by transactions.counterparty_id and transactions.counterparty_name.
 - QUANTITY LOGIC:
     1. If the question asks for "the" single best/worst/highest (singular), use LIMIT 1.
-    2. If the question asks for "items", "products", or "ones" (plural), use LIMIT {top_k} even for superlative questions.
+    2. If the question asks for customers, accounts, alerts, transactions, loans, merchants, branches, or rows (plural), use LIMIT {top_k} even for superlative questions.
     3. If the user specifies a number (e.g., "top 5"), use that exact LIMIT.
     4. If the user asks for "ALL", omit the LIMIT.
     5. Default to LIMIT {top_k} for all other general queries.
 
+Important join paths:
+- customers.branch_id = branches.branch_id
+- accounts.customer_id = customers.customer_id
+- transactions.account_id = accounts.account_id
+- aml_alerts.customer_id = customers.customer_id
+- aml_alerts.account_id = accounts.account_id
+- loans.customer_id = customers.customer_id
+
 Examples:
-Question: What is the most expensive product?
-SQLQuery: SELECT name, price FROM products ORDER BY price DESC LIMIT 1;
+Question: Which customers have open urgent AML alerts?
+SQLQuery: SELECT c.customer_id, c.full_name, c.risk_segment, a.alert_id, a.alert_score, a.status FROM aml_alerts AS a JOIN customers AS c ON a.customer_id = c.customer_id WHERE a.status = 'Open' AND a.alert_score >= 80 ORDER BY a.alert_score DESC LIMIT {top_k};
 
-Question: Show me the most expensive products.
-SQLQuery: SELECT name, price FROM products ORDER BY price DESC LIMIT {top_k};
+Question: What is the total amount transferred to Northstar Crypto Exchange?
+SQLQuery: SELECT counterparty_id, counterparty_name, SUM(amount_usd) AS total_amount_usd FROM transactions WHERE LOWER(counterparty_name) = LOWER('Northstar Crypto Exchange') GROUP BY counterparty_id, counterparty_name LIMIT {top_k};
 
-Question: Which item has the lowest stock?
-SQLQuery: SELECT name, stock_quantity FROM products ORDER BY stock_quantity ASC LIMIT 1;
+Question: Which customer has the highest outstanding loan balance?
+SQLQuery: SELECT c.customer_id, c.full_name, l.loan_id, l.outstanding_usd FROM loans AS l JOIN customers AS c ON l.customer_id = c.customer_id ORDER BY l.outstanding_usd DESC LIMIT 1;
 
 Schema:
 {table_info}
@@ -132,7 +149,7 @@ def ensure_read_only_sql(sql: str) -> str:
         "attach", "detach", "replace", "truncate", "vacuum", "pragma"
     ]
 
-    if any(word in normalized for word in blocked):
+    if any(re.search(rf"\b{re.escape(word)}\b", normalized) for word in blocked):
         raise ValueError("Only read-only SQL is allowed.")
 
     return sql.strip()
@@ -178,13 +195,11 @@ class SQLQueryService:
 
     def _generate_sql(self, question: str) -> str:
         raw_sql = self.sql_chain.invoke({"question": question})
-    
-        # --- ADD THIS DEBUG LINE ---
-        print(f"\n[DEBUG] LLM RAW OUTPUT:\n{raw_sql}\n[DEBUG] END RAW\n")
-        # ---------------------------
 
         cleaned_sql = strip_markdown_sql(raw_sql)
-        print(f"[DEBUG] CLEANED SQL: {cleaned_sql}")
+        if DEBUG_SQL:
+            print(f"\n[DEBUG] LLM RAW OUTPUT:\n{raw_sql}\n[DEBUG] END RAW\n")
+            print(f"[DEBUG] CLEANED SQL: {cleaned_sql}")
     
         cleaned_sql = ensure_read_only_sql(cleaned_sql)
         return cleaned_sql

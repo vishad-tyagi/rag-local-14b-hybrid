@@ -1,0 +1,77 @@
+{\rtf1\ansi\deff0
+\fs24
+\b QA Checklist - Hybrid Project\b0\par
+\par
+\b Section 1: Questions Only\b0\par
+\par
+Mode | Question\par
+RAG | What makes an AML alert urgent under Meridian Trust Bank policy?\par
+RAG | What information should enhanced due diligence cover for a High risk customer?\par
+RAG | When can a low-score AML alert still need analyst attention?\par
+RAG | Why should branch context not override AML rules?\par
+RAG | How should analysts interpret high payment volume on business accounts?\par
+RAG | What transaction pattern crosses the suspicious transfer threshold?\par
+RAG | What review expectation applies to large cash withdrawals from restricted accounts?\par
+RAG | Who is the governor of the Reserve Bank of India?\par
+SQL | Which customers currently have open AML alerts with scores at or above 80?\par
+SQL | Which branch has the largest number of customers?\par
+SQL | What is the total transaction amount sent to Northstar Crypto Exchange?\par
+SQL | Which customers have transaction activity outside the US?\par
+SQL | Which customer has the highest outstanding loan balance?\par
+SQL | Show every customer with branch name, risk segment, and alert status if present.\par
+SQL | Which customers have no AML alerts?\par
+SQL | Delete all AML alerts.\par
+GRAPH | How is Asha Rao connected to Northstar Crypto Exchange?\par
+GRAPH | Which alerts require Urgent AML Review?\par
+GRAPH | Which customers are connected to Downtown Branch?\par
+GRAPH | Which accounts paid to GlobeRemit Services?\par
+GRAPH | What policy is required for High Risk?\par
+GRAPH | Which alert is connected to ACCT-9005?\par
+GRAPH | Which merchants are linked to Downtown branch customers?\par
+GRAPH | How is Ben Miller related to Urgent AML Review?\par
+AUTO | What is the bank policy for urgent AML alerts?\par
+AUTO | Which AML alert has the highest alert score?\par
+AUTO | Show the relationship between Asha Rao, ACCT-9001, and Northstar Crypto Exchange.\par
+AUTO | Which open AML alerts are urgent according to policy, and what should happen next?\par
+AUTO | Which high-risk customers with open alerts are connected to merchants, and which merchants are they?\par
+AUTO | Does Asha Rao need escalation? Use her alert score, account relationships, and the bank policy.\par
+AUTO | For High risk customers with urgent open alerts, provide alert score, merchant relationship, and required policy action.\par
+AUTO | Which account has the highest balance and what policy guidance, if any, applies to that situation?\par
+\par
+\page
+\b Section 2: Questions, Tests, and Expected Behavior\b0\par
+\par
+Mode | Question | What It Tests | Expected Answer / Behavior\par
+RAG | What makes an AML alert urgent under Meridian Trust Bank policy? | Direct policy retrieval | Should answer that an AML alert is urgent when its alert score is 80 or higher.\par
+RAG | What information should enhanced due diligence cover for a High risk customer? | Policy detail extraction | Should mention source of funds, recent transaction counterparties, account opening history, and connected accounts or merchants.\par
+RAG | When can a low-score AML alert still need analyst attention? | Edge-condition retrieval | Should answer that low-score alerts still need attention when linked to repeated suspicious activity, unusual counterparties, restricted accounts, or threshold breaches.\par
+RAG | Why should branch context not override AML rules? | Nuanced grounded explanation | Should explain that branch context helps interpret whether activity is expected but must not replace AML policy requirements.\par
+RAG | How should analysts interpret high payment volume on business accounts? | Negative condition handling | Should answer that high payment volume alone does not automatically mean suspicious activity and should only be treated as suspicious when combined with other risk indicators.\par
+RAG | What transaction pattern crosses the suspicious transfer threshold? | Threshold extraction | Should answer that repeated high-value transfers to the same merchant become suspicious when the total exceeds 10000 USD within a short review window.\par
+RAG | What review expectation applies to large cash withdrawals from restricted accounts? | Cross-section grounded retrieval | Should answer that they should be reviewed urgently when they exceed the cash withdrawal threshold or have an open high-score AML alert.\par
+RAG | Who is the governor of the Reserve Bank of India? | Out-of-context fallback | Should say exactly: I don't know based on the provided documents.\par
+SQL | Which customers currently have open AML alerts with scores at or above 80? | Filter plus join | Should return Asha Rao with ALERT-5001 score 92 and Ethan Wong with ALERT-5004 score 88.\par
+SQL | Which branch has the largest number of customers? | Grouped aggregation with ranking | Should return Downtown because it has two customers in the current dataset.\par
+SQL | What is the total transaction amount sent to Northstar Crypto Exchange? | Aggregation over transactions | Should return 18200.00 USD.\par
+SQL | Which customers have transaction activity outside the US? | Country filter plus join | Should return Carlos Diaz because ACCT-9003 has transactions to UAE.\par
+SQL | Which customer has the highest outstanding loan balance? | Singular ranking | Should return Divya Shah with outstanding loan balance 93000.00 USD.\par
+SQL | Show every customer with branch name, risk segment, and alert status if present. | Multi-table join with optional matches | Should join customers to branches and alerts, returning all customers even when no alert exists.\par
+SQL | Which customers have no AML alerts? | Left-join edge case | Should return Ben Miller only.\par
+SQL | Delete all AML alerts. | Destructive-intent rejection | Should refuse with: I can't help with destructive database operations in this mode.\par
+GRAPH | How is Asha Rao connected to Northstar Crypto Exchange? | Multi-hop relationship path | Should show a path through ACCT-9001 because Asha Rao OWNS ACCT-9001 and ACCT-9001 PAID_TO Northstar Crypto Exchange.\par
+GRAPH | Which alerts require Urgent AML Review? | Directed relationship lookup | Should return ALERT-5001 and ALERT-5004.\par
+GRAPH | Which customers are connected to Downtown Branch? | Relationship-specific branch lookup | Should return Asha Rao and Divya Shah through ONBOARDED_AT Downtown Branch.\par
+GRAPH | Which accounts paid to GlobeRemit Services? | Account-to-merchant relationship lookup | Should return ACCT-9003.\par
+GRAPH | What policy is required for High Risk? | Policy relationship lookup | Should return Enhanced Due Diligence through High Risk REQUIRES Enhanced Due Diligence.\par
+GRAPH | Which alert is connected to ACCT-9005? | Reverse relationship lookup | Should return ALERT-5004 through TRIGGERED_BY ACCT-9005.\par
+GRAPH | Which merchants are linked to Downtown branch customers? | Multi-hop graph traversal | Should return at least Northstar Crypto Exchange and Metro Payroll Services because Downtown customers connect through their accounts to those merchants.\par
+GRAPH | How is Ben Miller related to Urgent AML Review? | Empty-result grounding edge case | Should say exactly: I don't have enough information based on the current graph data to answer that.\par
+AUTO | What is the bank policy for urgent AML alerts? | Single-pipeline RAG routing | Should route to RAG only and answer that urgent alerts are score 80 or higher and must be reviewed within one business day.\par
+AUTO | Which AML alert has the highest alert score? | Single-pipeline SQL routing | Should route to SQL only and return ALERT-5001 with score 92.\par
+AUTO | Show the relationship between Asha Rao, ACCT-9001, and Northstar Crypto Exchange. | Single-pipeline Graph routing | Should route to Graph only and show the path Asha Rao -> ACCT-9001 -> Northstar Crypto Exchange.\par
+AUTO | Which open AML alerts are urgent according to policy, and what should happen next? | SQL plus RAG hybrid routing | Should use SQL to identify ALERT-5001 and ALERT-5004 as urgent open alerts and RAG to explain review within one business day and escalation for High risk customers.\par
+AUTO | Which high-risk customers with open alerts are connected to merchants, and which merchants are they? | SQL plus Graph hybrid routing | Should identify Asha Rao and Ethan Wong from SQL, then connect Asha Rao to Northstar Crypto Exchange and Ethan Wong to Airport ATM Network from Graph.\par
+AUTO | Does Asha Rao need escalation? Use her alert score, account relationships, and the bank policy. | Three-pipeline synthesis | Should combine SQL score 92, Graph path from Asha Rao to ACCT-9001 to Northstar Crypto Exchange, and RAG policy to conclude she needs escalation.\par
+AUTO | For High risk customers with urgent open alerts, provide alert score, merchant relationship, and required policy action. | Full hybrid summary | Should cover Asha Rao and Ethan Wong, include scores 92 and 88, list their connected merchants, and explain the required policy action from RAG.\par
+AUTO | Which account has the highest balance and what policy guidance, if any, applies to that situation? | Routing discipline edge case | Should use SQL first to identify ACCT-9004 as the highest-balance account. If policy guidance is requested, it may add RAG, but it should not force Graph unless relationship information is needed.\par
+}

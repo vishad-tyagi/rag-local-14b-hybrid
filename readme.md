@@ -43,3 +43,8 @@ npm run dev
 
 -- control+C to stop terminal 
 
+
+cd frontend
+npm install
+npm run dev
+

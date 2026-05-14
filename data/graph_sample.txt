@@ -1,53 +1,81 @@
-Title: Offline RAG Knowledge Graph Test Set
+Title: Meridian Trust Bank Relationship Graph Test Set
 
-Butler is a local assistant for offline RAG systems.
-A RAG Pipeline USES LangChain.
-A RAG Pipeline USES FAISS.
-A RAG Pipeline USES an Embedding Model.
-A RAG Pipeline USES a Local LLM.
+Asha Rao is a Customer.
+Ben Miller is a Customer.
+Carlos Diaz is a Customer.
+Divya Shah is a Customer.
+Ethan Wong is a Customer.
 
-LangChain is a Library.
-LangChain USES Prompt Templates.
-LangChain RELATED_TO Orchestration.
+Downtown Branch is a Branch.
+Lakeside Branch is a Branch.
+Airport Branch is a Branch.
+Capital Market Branch is a Branch.
 
-FAISS is a Library.
-FAISS IMPLEMENTS IndexFlatL2.
-FAISS IMPLEMENTS HNSW.
-HNSW is an IndexType.
-IndexFlatL2 is an IndexType.
-HNSW OPTIMIZES Search Speed.
-IndexFlatL2 OPTIMIZES Exact Retrieval.
+ACCT-9001 is an Account.
+ACCT-9002 is an Account.
+ACCT-9003 is an Account.
+ACCT-9004 is an Account.
+ACCT-9005 is an Account.
 
-all-MiniLM-L6-v2 is a Model.
-all-MiniLM-L6-v2 RELATED_TO Embeddings.
-all-MiniLM-L6-v2 RELATED_TO 384 Dimensions.
+Northstar Crypto Exchange is a Merchant.
+City Utilities is a Merchant.
+GlobeRemit Services is a Merchant.
+Metro Payroll Services is a Merchant.
+Airport ATM Network is a Merchant.
 
-bge-large-en-v1.5 is a Model.
-bge-large-en-v1.5 RELATED_TO Embeddings.
-bge-large-en-v1.5 RELATED_TO 1024 Dimensions.
+ALERT-5001 is an Alert.
+ALERT-5002 is an Alert.
+ALERT-5003 is an Alert.
+ALERT-5004 is an Alert.
 
-Qwen2.5-Coder-14B-Instruct-4bit is a Model.
-Qwen2.5-Coder-14B-Instruct-4bit PART_OF Local Inference.
-Qwen2.5-Coder-14B-Instruct-4bit RELATED_TO MLX.
+High Risk is a RiskSegment.
+Medium Risk is a RiskSegment.
+Low Risk is a RiskSegment.
 
-Prompt Template is a Concept.
-Prompt Template OPTIMIZES Faithfulness.
-Chunk Overlap is a Concept.
-Chunk Overlap OPTIMIZES Context Preservation.
-Semantic Chunking is a Concept.
-Semantic Chunking OPTIMIZES Retrieval Accuracy.
+Enhanced Due Diligence is a Policy.
+Urgent AML Review is a Policy.
+Transaction Threshold Review is a Policy.
+Credit Exposure Review is a Policy.
 
-RAGAS is a Technology.
-RAGAS EVALUATES Faithfulness.
-RAGAS EVALUATES Context Precision.
-RAGAS EVALUATES Context Recall.
-RAGAS EVALUATES Answer Relevance.
+Asha Rao OWNS ACCT-9001.
+Ben Miller OWNS ACCT-9002.
+Carlos Diaz OWNS ACCT-9003.
+Divya Shah OWNS ACCT-9004.
+Ethan Wong OWNS ACCT-9005.
 
-Faithfulness is a Metric.
-Context Precision is a Metric.
-Context Recall is a Metric.
-Answer Relevance is a Metric.
+Asha Rao ONBOARDED_AT Downtown Branch.
+Ben Miller ONBOARDED_AT Lakeside Branch.
+Carlos Diaz ONBOARDED_AT Airport Branch.
+Divya Shah ONBOARDED_AT Downtown Branch.
+Ethan Wong ONBOARDED_AT Capital Market Branch.
 
-Neo4j is a Technology.
-Neo4j RELATED_TO Knowledge Graphs.
-Knowledge Graphs RELATED_TO Entity Relationships.
+Asha Rao HAS_RISK_SEGMENT High Risk.
+Ben Miller HAS_RISK_SEGMENT Low Risk.
+Carlos Diaz HAS_RISK_SEGMENT Medium Risk.
+Divya Shah HAS_RISK_SEGMENT Medium Risk.
+Ethan Wong HAS_RISK_SEGMENT High Risk.
+
+ACCT-9001 PAID_TO Northstar Crypto Exchange.
+ACCT-9002 PAID_TO City Utilities.
+ACCT-9003 PAID_TO GlobeRemit Services.
+ACCT-9004 PAID_TO Metro Payroll Services.
+ACCT-9004 PAID_TO Northstar Crypto Exchange.
+ACCT-9005 PAID_TO Airport ATM Network.
+
+ALERT-5001 TRIGGERED_BY ACCT-9001.
+ALERT-5002 TRIGGERED_BY ACCT-9003.
+ALERT-5003 TRIGGERED_BY ACCT-9004.
+ALERT-5004 TRIGGERED_BY ACCT-9005.
+
+ALERT-5001 APPLIES_TO Asha Rao.
+ALERT-5002 APPLIES_TO Carlos Diaz.
+ALERT-5003 APPLIES_TO Divya Shah.
+ALERT-5004 APPLIES_TO Ethan Wong.
+
+High Risk REQUIRES Enhanced Due Diligence.
+ALERT-5001 REQUIRES Urgent AML Review.
+ALERT-5004 REQUIRES Urgent AML Review.
+Northstar Crypto Exchange SUBJECT_TO Transaction Threshold Review.
+GlobeRemit Services SUBJECT_TO Transaction Threshold Review.
+Credit Exposure Review RELATED_TO High Risk.
+Credit Exposure Review RELATED_TO Medium Risk.

@@ -1,44 +1,37 @@
-Title: Architecting Offline Retrieval-Augmented Generation (RAG) Systems
-Author: Advanced AI Systems Group
-Date: October 2023
-Version: 2.1 (Extended Technical Reference)
+Title: Meridian Trust Bank Risk Operations Handbook
+Department: Financial Crime, Credit Risk, and Customer Operations
+Version: 2026-Q2
 
-Abstract:
-This document outlines the architecture, optimization strategies, and evaluation methodologies for building fully offline Retrieval-Augmented Generation (RAG) pipelines. By eliminating reliance on cloud APIs, organizations can ensure stringent data privacy, drastically reduce latency, and leverage localized consumer hardware for enterprise-grade natural language processing. This paper covers ingestion, embedding, vector storage, generation, and systematic evaluation.
+Section 1: Customer Risk Segmentation
+Meridian Trust Bank assigns each customer a risk segment of Low, Medium, or High. Risk segmentation is based on onboarding information, transaction behavior, fraud alerts, and credit exposure. A customer should be reviewed manually if they are High risk and have either an unresolved AML alert or transaction activity above normal peer behavior.
 
-Section 1: The Ingestion Phase and Advanced Chunking
-The foundation of any RAG system is the ingestion phase, where raw, unstructured documents are parsed and split into manageable segments. The strategy used to divide this text is critical to the system's eventual accuracy. 
-The most common approach is Recursive Character Splitting. This method attempts to split text by paragraphs, then sentences, and finally words, aiming to keep related concepts together. For technical documentation, the recommended chunk size is typically between 500 and 1000 tokens, with a strict overlap of 50 to 150 tokens. This overlap prevents critical context from being severed at the chunk boundaries.
-More advanced implementations are transitioning to Semantic Chunking. Instead of using arbitrary character counts, semantic chunking uses a lightweight NLP model to analyze the meaning of sentences and dynamically groups them by topical similarity. While computationally heavier during the ingestion phase, semantic chunking has been shown to improve retrieval accuracy by up to 18% in highly technical domains.
+High-risk customers require enhanced due diligence. Enhanced due diligence includes reviewing source of funds, recent transaction counterparties, account opening history, and any connected accounts or merchants. Analysts should document the reason for escalation before closing a review.
 
-Section 2: Embedding Models and Dimensionality
-Once documents are chunked, they must be converted into dense vector representations. The choice of embedding model directly dictates the quality of the semantic search.
-For local deployments focused on speed and low memory footprint, the 'all-MiniLM-L6-v2' model from Hugging Face is the industry standard. It produces vectors with 384 dimensions and requires less than 100MB of RAM to run. 
-However, for higher accuracy, developers often utilize models like 'bge-large-en-v1.5' or 'nomic-embed-text'. The 'bge-large' model produces high-resolution vectors with 1024 dimensions. While it captures much finer semantic nuances, the resulting vector database will consume nearly three times as much storage space as one built with MiniLM, and the similarity search will require more compute.
+Section 2: AML Alert Handling
+An AML alert is considered urgent when its alert score is 80 or higher. Urgent AML alerts must be reviewed within one business day. If an urgent alert is linked to a customer with a High risk segment, the case should be escalated to the Financial Crime Review Team.
 
-Section 3: Vector Storage and Index Optimization
-FAISS (Facebook AI Similarity Search) remains the premier library for efficient similarity search and clustering of dense vectors in memory. 
-When configuring FAISS, developers must choose an index type that balances speed against exhaustive accuracy. For datasets under 1 million vectors, 'IndexFlatL2' provides exact search results by calculating the L2 (Euclidean) distance between the query vector and every stored vector. 
-For larger, production-scale datasets, an HNSW (Hierarchical Navigable Small World) index is preferred over brute-force methods. HNSW constructs a multi-layered graph of the vector space. During a search, it traverses from the sparse upper layers down to the dense bottom layers, quickly zeroing in on the nearest neighbors. An HNSW index can search a billion vectors in milliseconds, though it requires significantly more RAM to hold the graph structure in memory compared to 'IndexFlatL2'.
+Alerts with scores between 60 and 79 are moderate priority. Moderate-priority alerts should be reviewed within three business days. Alerts below 60 may be monitored unless they are connected to repeated suspicious transaction patterns.
 
-Section 4: Orchestration and Prompt Engineering
-LangChain is the standard orchestration framework used to bind these disparate components together. It provides specialized wrappers for document loaders, text splitters, and the vector stores themselves. 
-In a pure local setup, developers utilize LangChain's 'HuggingFaceEmbeddings' class to execute models directly via PyTorch. 
-A critical, often overlooked step in orchestration is the Prompt Template. When the retrieved chunks are passed to the LLM, they must be formatted clearly. A standard robust prompt template structure looks like this:
-"Use the following pieces of retrieved context to answer the user's question. If you don't know the answer, just say that you don't know, don't try to make up an answer. 
-Context: {context} 
-Question: {question}"
-Enforcing this structure helps mitigate hallucinations and grounds the generation strictly in the retrieved facts.
+A low-score AML alert can still require analyst attention when it is linked to repeated suspicious activity, unusual counterparties, restricted accounts, or transaction behavior that exceeds stated policy thresholds. Low score alone is not enough to close an alert when other risk signals are present.
 
-Section 5: Local LLM Inference and Quantization
-The final stage is generation, where the retrieved context is synthesized by a Large Language Model (LLM). Running multi-billion parameter models locally requires utilizing quantized model weights.
-The GGUF (GPT-Generated Unified Format) file structure is designed specifically for this purpose. It reduces the precision of the model weights from 16-bit floating-point (FP16) down to smaller integer formats. 
-The quantization level determines the balance between intelligence and hardware requirements. A 'Q8_0' quantization uses 8-bit integers, offering near-perfect parity with the original unquantized model but requiring substantial RAM. A 'Q4_K_M' quantization uses a mix of 4-bit and 5-bit integers; it is widely considered the "sweet spot" for consumer hardware. 
-For example, an unquantized 8-billion parameter model requires roughly 16GB of VRAM. That same model in a Q4_K_M GGUF format requires only about 4.8GB of RAM, allowing it to run smoothly on standard laptops. Inference engines natively support GGUF files and automatically hardware-accelerate generation using Apple's Metal Performance Shaders (MPS) on Mac environments, resulting in token generation speeds of 40 to 60 tokens per second.
+Section 3: Suspicious Transaction Patterns
+The bank treats repeated high-value transfers to the same merchant as a suspicious pattern when the total transferred amount exceeds 10000 USD within a short review window. Cash withdrawals above 5000 USD should be checked against the customer's historical activity. International transfers should receive additional review when the destination merchant or receiving party is not part of the customer's normal profile.
 
-Section 6: Evaluating RAG Pipelines
-Once the pipeline is active, it must be evaluated quantitatively. The RAGAS (Retrieval Augmented Generation Assessment) framework proposes several key metrics:
-1. Context Precision: Measures if the most relevant chunks of text were ranked at the very top of the retrieved results.
-2. Context Recall: Measures if the retrieved chunks contain all the necessary information required to fully answer the user's query.
-3. Faithfulness: Measures whether the LLM's generated answer is entirely derived from the retrieved context, penalizing any external hallucinations.
-4. Answer Relevance: Measures how directly the generated answer addresses the original prompt, penalizing tangential or overly verbose responses.
+Section 4: Credit Risk Review
+Loan accounts are monitored separately from deposit accounts. A loan is considered elevated credit exposure when the outstanding balance is above 50000 USD and the customer risk segment is Medium or High. Elevated exposure does not automatically mean fraud, but it should be considered when prioritizing manual reviews.
+
+Section 5: Branch and Relationship Context
+Branch context can help explain operational patterns. Customers associated with the Downtown branch often include business accounts with higher payment volume. Customers associated with the Airport branch may have more international transactions. Branch context should not override AML rules, but it can help analysts interpret whether activity is expected.
+
+High business payment volume does not automatically mean suspicious activity. Business accounts may normally send larger or more frequent payments than individual accounts. Analysts should treat the activity as suspicious only when it also matches risk indicators such as repeated high-value transfers, urgent AML alerts, unusual counterparties, or threshold breaches.
+
+Section 6: Example Internal Notes
+Customer CUST-1001, Asha Rao, was onboarded through the Downtown branch and has a High risk segment. Her account ACCT-9001 has recent transfers to merchant MRC-77, Northstar Crypto Exchange. If the transaction totals are above the policy threshold and an urgent AML alert exists, the review should be escalated.
+
+Customer CUST-1002, Ben Miller, was onboarded through the Lakeside branch and has a Low risk segment. His account activity is mostly domestic utility payments and payroll deposits. If no high-score alert is present, routine monitoring is usually sufficient.
+
+Customer CUST-1003, Carlos Diaz, was onboarded through the Airport branch and has a Medium risk segment. His account ACCT-9003 has international transfers to merchant MRC-88, GlobeRemit Services. International transfer activity should be checked against the customer profile and any active alerts.
+
+Customer CUST-1004, Divya Shah, has a business checking account at the Downtown branch. Business accounts may have higher payment volume, but repeated high-value transfers still require review if they exceed AML policy thresholds.
+
+Customer CUST-1005, Ethan Wong, has a restricted account and a High risk segment. Large cash withdrawals from restricted accounts should be reviewed urgently when they exceed the cash withdrawal threshold or have an open high-score AML alert.
