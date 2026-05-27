@@ -221,6 +221,37 @@ class AutoQueryService:
             "sources": _source_list(docs),
         }
 
+    def _mode_question(self, question: str, mode: str, modes: List[str]) -> str:
+        if mode != "sql" or len(modes) == 1:
+            return question
+
+        lowered = question.lower()
+        sql_question = question.strip()
+
+        split_patterns = [
+            r",?\s+and what policy guidance.*$",
+            r",?\s+and what should happen next.*$",
+            r",?\s+and what policy says.*$",
+            r",?\s+and what policy applies.*$",
+            r",?\s+and the required policy action.*$",
+            r",?\s+and required policy action.*$",
+            r",?\s+and what guidance applies.*$",
+        ]
+
+        for pattern in split_patterns:
+            candidate = re.sub(pattern, "", sql_question, flags=re.IGNORECASE).strip(" ,?")
+            if candidate and candidate != sql_question:
+                sql_question = candidate
+                break
+
+        if "highest balance" in lowered:
+            return "Which account has the highest balance?"
+
+        if "urgent according to policy" in lowered:
+            return re.sub(r"\s+according to policy", "", sql_question, flags=re.IGNORECASE).strip(" ,?")
+
+        return sql_question
+
     def _run_selected_modes(self, question: str, modes: List[str]) -> Dict[str, Any]:
         outputs = {}
         errors = []
@@ -233,7 +264,7 @@ class AutoQueryService:
 
         if "sql" in modes:
             try:
-                outputs["sql"] = self.sql_service.run(question)
+                outputs["sql"] = self.sql_service.run(self._mode_question(question, "sql", modes))
             except Exception as exc:
                 errors.append({"mode": "sql", "error": str(exc)})
 

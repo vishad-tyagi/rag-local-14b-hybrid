@@ -14,6 +14,7 @@ from hf_models import LangChainMLXLLM, MLXLocalLLM
 
 DB_PATH = Path("data.db").resolve()
 DEBUG_SQL = os.getenv("DEBUG_SQL", "false").lower() == "true"
+DESTRUCTIVE_SQL_MESSAGE = "I can't help with destructive database operations in this mode."
 
 SQL_SYSTEM_PROMPT = (
     "You are Butler, an expert SQLite assistant. "
@@ -155,6 +156,23 @@ def ensure_read_only_sql(sql: str) -> str:
     return sql.strip()
 
 
+def is_destructive_sql_request(question: str) -> bool:
+    normalized = question.strip().lower()
+    destructive_patterns = [
+        r"\bdelete\b",
+        r"\bdrop\b",
+        r"\btruncate\b",
+        r"\bremove\b",
+        r"\bupdate\b",
+        r"\binsert\b",
+        r"\balter\b",
+        r"\bcreate\b",
+        r"\bclear\b",
+        r"\berase\b",
+    ]
+    return any(re.search(pattern, normalized) for pattern in destructive_patterns)
+
+
 def execute_read_only_sql(sql: str) -> Dict[str, Any]:
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     cur = conn.cursor()
@@ -268,6 +286,14 @@ Write a concise natural-language summary of the result.
         )
 
     def run(self, question: str) -> Dict[str, Any]:
+        if is_destructive_sql_request(question):
+            return {
+                "sql": "",
+                "columns": [],
+                "rows": [],
+                "summary": DESTRUCTIVE_SQL_MESSAGE,
+            }
+
         sql = self._generate_sql(question)
 
         try:
