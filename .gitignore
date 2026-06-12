@@ -4,3 +4,9 @@ __pycache__/
 .env
 data.db
 repomix-output.xml
+
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
