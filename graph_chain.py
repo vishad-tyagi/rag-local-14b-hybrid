@@ -39,16 +39,29 @@ Instructions:
 5. RELATIONSHIPS:
    - Prefer explicit relationship types from the schema when clearly relevant.
    - If the exact relationship is unclear, use a generic undirected relationship pattern like `-[r]-` instead of guessing.
-   - For banking relationship wording, prefer these mappings when present in the schema:
-     * customer owns account -> OWNS
-     * customer connected to branch, branch customers, onboarded at branch -> ONBOARDED_AT
-     * customer risk segment -> HAS_RISK_SEGMENT
-     * account paid merchant, account connected to merchant, merchant paid by account -> PAID_TO
-     * alert triggered by account -> TRIGGERED_BY
-     * alert applies to customer -> APPLIES_TO
-     * alert or risk segment requires policy/review -> REQUIRES
-     * merchant subject to review/policy -> SUBJECT_TO
+   - The graph uses these EXACT directed relationships. Match the direction shown:
+     * (Customer)-[:OWNS]->(Account)
+     * (Customer)-[:ONBOARDED_AT]->(Branch)
+     * (Customer)-[:HAS_RISK_SEGMENT]->(RiskSegment)
+     * (Account)-[:PAID_TO]->(Merchant)
+     * (Alert)-[:TRIGGERED_BY]->(Account)
+     * (Alert)-[:APPLIES_TO]->(Customer)
+     * (Alert)-[:REQUIRES]->(Policy)  and  (RiskSegment)-[:REQUIRES]->(Policy)
+     * (Merchant)-[:SUBJECT_TO]->(Policy)
+   - A customer is NOT directly connected to a merchant or an alert. Traverse:
+     * customer to merchant: (Customer)-[:OWNS]->(Account)-[:PAID_TO]->(Merchant)
+     * customer to alert:    (Alert)-[:APPLIES_TO]->(Customer)  (alert points to customer)
    - Do not use RELATED_TO for branch, account, merchant, alert, or policy questions unless the schema shows no more specific relationship.
+
+5a. PROPERTIES:
+   - Every node has ONLY the property `id` (for example 'Asha Rao', 'ACCT-9001', 'High Risk', 'ALERT-5001').
+   - Do NOT reference any other property such as `.name`, `.score`, `.status`, `.balance`, or `.amount`. They do not exist on graph nodes.
+   - Match nodes by their `id` text only, using `toLower(n.id) CONTAINS toLower('...')`.
+
+5b. LITERAL VALUES:
+   - Match the entity text exactly as a human would write it. Node ids use spaces, not hyphens: use 'high risk' NOT 'high-risk', 'low risk' NOT 'low-risk'.
+   - Do not invent compound literals that are not real node ids. There is no node whose id contains 'urgent open', 'open alert', or 'high score'.
+   - Concepts like "open", "urgent", "high score", or "at or above 80" are NOT stored in the graph. Do not try to filter on them in Cypher; ignore those qualifiers and return the structural relationships instead.
 
 6. QUERY SIMPLICITY:
    - Prefer the simplest valid query that answers the question.
@@ -149,6 +162,29 @@ WHERE toLower(coalesce(target.id, target.name, '')) CONTAINS toLower('globeremit
   AND NOT source:Document
   AND NOT target:Document
 RETURN source, r, target
+LIMIT 25
+
+PATTERN I - Risk-Segment Customers To Their Merchants (multi-hop)
+Example question: "Which high-risk customers are connected to merchants, and which merchants are they?"
+Note: ignore non-graph qualifiers like "open alerts", "urgent", or "high score"; return the structural customer-to-merchant connections.
+Example query:
+MATCH (customer:Customer)-[:HAS_RISK_SEGMENT]->(riskSegment:RiskSegment)
+WHERE toLower(riskSegment.id) CONTAINS toLower('high risk')
+MATCH (customer)-[:OWNS]->(account:Account)-[:PAID_TO]->(merchant:Merchant)
+WHERE NOT customer:Document AND NOT merchant:Document
+RETURN customer.id AS customer, merchant.id AS merchant
+LIMIT 25
+
+PATTERN J - Risk-Segment Customers With Their Merchant And Required Policy
+Example question: "For high risk customers, give the merchant relationship and the required policy."
+Note: alerts point to customers via APPLIES_TO; policies attach to the risk segment via REQUIRES.
+Example query:
+MATCH (customer:Customer)-[:HAS_RISK_SEGMENT]->(riskSegment:RiskSegment)
+WHERE toLower(riskSegment.id) CONTAINS toLower('high risk')
+MATCH (customer)-[:OWNS]->(account:Account)-[:PAID_TO]->(merchant:Merchant)
+OPTIONAL MATCH (riskSegment)-[:REQUIRES]->(policy:Policy)
+WHERE NOT customer:Document AND NOT merchant:Document
+RETURN customer.id AS customer, merchant.id AS merchant, policy.id AS requiredPolicy
 LIMIT 25
 
 Schema:
@@ -267,6 +303,40 @@ class GraphQueryService:
     def _fallback_cypher(self, question: str) -> str | None:
         q = question.lower()
 
+        # Risk-segment customers -> their merchants (multi-hop). Covers AUTO
+        # questions like "which high-risk customers ... connected to merchants".
+        # Non-graph qualifiers (open alerts, urgent, high score) are ignored on
+        # purpose; SQL handles those, the graph only holds structural links.
+        risk_segments = {
+            "high risk": "high risk",
+            "high-risk": "high risk",
+            "medium risk": "medium risk",
+            "medium-risk": "medium risk",
+            "low risk": "low risk",
+            "low-risk": "low risk",
+        }
+        matched_segment = next((name for key, name in risk_segments.items() if key in q), None)
+        if matched_segment and _contains_any(q, ["merchant", "merchants"]):
+            if _contains_any(q, ["policy", "policies", "required", "requires"]):
+                return f"""
+MATCH (customer:Customer)-[:HAS_RISK_SEGMENT]->(riskSegment:RiskSegment)
+WHERE toLower(riskSegment.id) CONTAINS toLower('{matched_segment}')
+MATCH (customer)-[:OWNS]->(account:Account)-[:PAID_TO]->(merchant:Merchant)
+OPTIONAL MATCH (riskSegment)-[:REQUIRES]->(policy:Policy)
+WHERE NOT customer:Document AND NOT merchant:Document
+RETURN customer.id AS customer, merchant.id AS merchant, policy.id AS requiredPolicy
+LIMIT 25
+""".strip()
+
+            return f"""
+MATCH (customer:Customer)-[:HAS_RISK_SEGMENT]->(riskSegment:RiskSegment)
+WHERE toLower(riskSegment.id) CONTAINS toLower('{matched_segment}')
+MATCH (customer)-[:OWNS]->(account:Account)-[:PAID_TO]->(merchant:Merchant)
+WHERE NOT customer:Document AND NOT merchant:Document
+RETURN customer.id AS customer, merchant.id AS merchant
+LIMIT 25
+""".strip()
+
         if "urgent aml review" in q and _contains_any(q, ["alert", "alerts", "require", "requires"]):
             return """
 MATCH (alert:Alert)-[r:REQUIRES]->(policy:Policy)
@@ -340,6 +410,20 @@ LIMIT 8
 
         return None
 
+    @staticmethod
+    def _has_null_cells(results: Any) -> bool:
+        """A result row with null cells means the LLM query matched a partial
+        path (typically a stray OPTIONAL MATCH on a non-existent value), so it
+        dropped identifying columns like the customer or policy."""
+        if not isinstance(results, list):
+            return False
+        return any(
+            value is None
+            for row in results
+            if isinstance(row, dict)
+            for value in row.values()
+        )
+
     def run(self, question: str) -> Dict[str, Any]:
         cypher_query = self._generate_cypher(question)
         print(f"[DEBUG] Generated Cypher: {cypher_query}")
@@ -347,9 +431,13 @@ LIMIT 8
         try:
             results = self.graph.query(cypher_query)
             fallback_cypher = self._fallback_cypher(question)
-            if not results and fallback_cypher and fallback_cypher != cypher_query:
+            # Use the deterministic fallback when the LLM query returned nothing
+            # OR returned degenerate rows (null cells). The fallback only exists
+            # for recognized banking shapes and returns complete, verified rows.
+            needs_fallback = not results or self._has_null_cells(results)
+            if needs_fallback and fallback_cypher and fallback_cypher != cypher_query:
                 fallback_results = self.graph.query(fallback_cypher)
-                if fallback_results:
+                if fallback_results and not self._has_null_cells(fallback_results):
                     cypher_query = fallback_cypher
                     results = fallback_results
 
